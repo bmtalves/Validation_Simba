@@ -13,8 +13,10 @@ import ifcopenshell.api.pset
 
 
 MVD = "{http://buildingsmart-tech.org/mvd/XML/1.1}"
-RULES_FOLDER = Path(__file__).resolve().parent
-DASHBOARD_TEMPLATE = RULES_FOLDER / "dashboard_template.html"
+TOOL_FOLDER = Path(__file__).resolve().parent
+# Rules files are read from "Simba Rules" and from the tool's own folder
+RULES_FOLDERS = [TOOL_FOLDER / "Simba Rules", TOOL_FOLDER]
+DASHBOARD_TEMPLATE = TOOL_FOLDER / "dashboard_template.html"
 
 # Statsbygg fills free-text [Value] rules with example values ('1234567', 'Building name'),
 # so for these attributes a [Value] rule only means "must be filled in"
@@ -60,7 +62,7 @@ def main():
     if model.schema != "IFC4":
         print(f"Warning: Statsbygg requires IFC4, this model is {model.schema}")
 
-    concepts, phase = choose_exchange_requirement([rules_path] if rules_path else sorted(RULES_FOLDER.glob("*.mvdxml")))
+    concepts, phase = choose_exchange_requirement([rules_path] if rules_path else find_rule_files(RULES_FOLDERS))
     changed = migrate_designed_status(model)
 
     results = validate(model, concepts)
@@ -73,7 +75,6 @@ def main():
         print(f"File saved as {report_name}.csv")
     if report in ("html dashboard", "both"):
         export_dashboard(results, model, model_path, phase, f"{report_name}.html")
-        print(f"Dashboard saved as {report_name}.html")
 
     fixable = any(not r.passed and r.concept.fix for r in results)
     if fixable and ask_yes_no("Fill in missing values now?"):
@@ -85,7 +86,6 @@ def main():
         changed = True
         if ask_yes_no("Export an updated dashboard?"):
             export_dashboard(results, model, model_path, phase, f"{report_name} updated.html", passed_before)
-            print(f"Dashboard saved as {report_name} updated.html")
     else:
         print_manual(results)
 
@@ -107,6 +107,17 @@ def get_arguments(argv):
             sys.exit("Not an mvdXML file")
         return argv[1], Path(argv[2])
     return argv[1], None
+
+
+def find_rule_files(folders):
+    files = []
+    for folder in folders:
+        files += sorted(folder.glob("*.mvdxml"))
+    # The same file in both folders should only be listed once
+    unique = {}
+    for path in files:
+        unique.setdefault(path.name, path)
+    return list(unique.values())
 
 
 def load_model(path):
@@ -462,10 +473,14 @@ def dashboard_data(results, model, model_path, phase, passed_before=None):
 
 
 def export_dashboard(results, model, model_path, phase, filename, passed_before=None):
+    if not DASHBOARD_TEMPLATE.exists():
+        print(f"Dashboard not saved: {DASHBOARD_TEMPLATE.name} must be in the same folder as this script")
+        return
     data = json.dumps(dashboard_data(results, model, model_path, phase, passed_before))
     # "</" would end the <script> block early if an object name contained "</script>"
     html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8").replace("/*DATA*/null", data.replace("</", "<\\/"))
     Path(filename).write_text(html, encoding="utf-8")
+    print(f"Dashboard saved as {filename}")
 
 
 # ---------- Fixing ----------

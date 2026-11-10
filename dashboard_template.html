@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SIMBA Validation Report</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page: #f9f9f7;
+    --surface: #fcfcfb;
+    --text-primary: #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted: #898781;
+    --grid: #e1e0d9;
+    --axis: #c3c2b7;
+    --border: rgba(11, 11, 11, 0.10);
+    --track: #f0efec;
+    --good: #0ca30c;
+    --good-text: #006300;
+    --critical: #d03b3b;
+    --warning: #fab219;
+    --accent: #2a78d6;
+    --accent-wash: rgba(42, 120, 214, 0.10);
+    --tooltip-bg: #0b0b0b;
+    --tooltip-text: #f0efec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page: #0d0d0d;
+      --surface: #1a1a19;
+      --text-primary: #f0efec;
+      --text-secondary: #c3c2b7;
+      --text-muted: #898781;
+      --grid: #2c2c2a;
+      --axis: #383835;
+      --border: rgba(255, 255, 255, 0.10);
+      --track: #2c2c2a;
+      --good-text: #0ca30c;
+      --accent: #3987e5;
+      --accent-wash: rgba(57, 135, 229, 0.14);
+      --tooltip-bg: #f0efec;
+      --tooltip-text: #0b0b0b;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page: #0d0d0d;
+    --surface: #1a1a19;
+    --text-primary: #f0efec;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --grid: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.10);
+    --track: #2c2c2a;
+    --good-text: #0ca30c;
+    --accent: #3987e5;
+    --accent-wash: rgba(57, 135, 229, 0.14);
+    --tooltip-bg: #f0efec;
+    --tooltip-text: #0b0b0b;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--page);
+    color: var(--text-primary);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  main { max-width: 1180px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: var(--text-secondary); margin: 0; }
+  .muted { color: var(--text-muted); }
+  header { display: flex; flex-wrap: wrap; gap: 12px 24px; justify-content: space-between; align-items: flex-end; margin-bottom: 24px; }
+  .meta { display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--text-secondary); font-size: 13px; }
+  .meta b { color: var(--text-primary); font-weight: 600; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--border); font-size: 12px; color: var(--text-secondary); white-space: nowrap;
+  }
+  .badge .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .theme-toggle {
+    border: 1px solid var(--border); background: var(--surface); color: var(--text-secondary);
+    border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .grid-top { display: grid; grid-template-columns: minmax(260px, 1.2fr) 2fr; gap: 16px; margin-bottom: 16px; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .tile .label { color: var(--text-secondary); font-size: 13px; }
+  .tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+  .tile .note { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+  .hero .value { font-size: 56px; font-weight: 600; line-height: 1.05; margin: 8px 0 4px; letter-spacing: -0.02em; }
+  .delta-good { color: var(--good-text); font-weight: 600; }
+  .seg { display: flex; gap: 2px; height: 8px; margin-top: 14px; }
+  .seg span { border-radius: 999px; min-width: 0; }
+
+  .grid-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
+  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 8px 0 14px; }
+  .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
+  .bars { display: grid; gap: 2px; }
+  .bar-row {
+    display: grid; grid-template-columns: minmax(110px, 38%) 1fr 64px; gap: 12px; align-items: center;
+    padding: 5px 6px; border-radius: 6px; cursor: default;
+  }
+  .bar-row:hover, .bar-row:focus-visible { background: var(--accent-wash); outline: none; }
+  .bar-row .name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--text-primary); }
+  .bar-row .num { text-align: right; color: var(--text-secondary); font-variant-numeric: tabular-nums; font-size: 13px; }
+  .track { display: flex; gap: 2px; height: 12px; }
+  .track span { height: 100%; }
+  .track span:first-child { border-radius: 4px 0 0 4px; }
+  .track span:last-child { border-radius: 0 4px 4px 0; }
+  .track span:only-child { border-radius: 4px; }
+  .more { margin-top: 8px; }
+  .link-btn { background: none; border: none; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; padding: 4px 6px; }
+
+  .section { margin-bottom: 16px; }
+  .section-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px; margin-bottom: 14px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; }
+  .filters select, .filters input {
+    font: inherit; font-size: 13px; color: var(--text-primary); background: var(--page);
+    border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; min-width: 0;
+  }
+  .filters input { width: 200px; }
+  .table-wrap { overflow: auto; max-height: 560px; border-top: 1px solid var(--grid); }
+  thead th { position: sticky; top: 0; background: var(--surface); z-index: 1; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th {
+    text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 12px;
+    padding: 8px 10px; border-bottom: 1px solid var(--axis); white-space: nowrap;
+  }
+  th.sortable { cursor: pointer; user-select: none; }
+  th.sortable:hover { color: var(--text-primary); }
+  th .arrow { color: var(--text-muted); margin-left: 4px; }
+  td { padding: 8px 10px; border-bottom: 1px solid var(--grid); vertical-align: top; }
+  tr:hover td { background: var(--accent-wash); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .status { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .status .icon {
+    width: 16px; height: 16px; border-radius: 50%; display: inline-grid; place-items: center;
+    color: #fff; font-size: 11px; font-weight: 700; line-height: 1;
+  }
+  .meter { display: flex; gap: 2px; width: 100px; height: 6px; margin-top: 6px; }
+  .meter span { border-radius: 999px; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--border); color: var(--text-secondary); white-space: nowrap; }
+  .mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12px; color: var(--text-secondary); }
+  .fails { color: var(--text-secondary); }
+  .empty { color: var(--text-muted); padding: 20px 10px; text-align: center; }
+  .count { color: var(--text-muted); font-size: 12px; margin-top: 10px; }
+
+  #tooltip {
+    position: fixed; pointer-events: none; z-index: 10; background: var(--tooltip-bg); color: var(--tooltip-text);
+    padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; max-width: 280px;
+    opacity: 0; transition: opacity 0.1s;
+  }
+  #tooltip b { font-weight: 600; }
+
+  @media (max-width: 860px) {
+    .grid-top, .grid-charts { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 520px) {
+    .filters, .filters select, .filters input { width: 100%; }
+    .bar-row { grid-template-columns: minmax(90px, 40%) 1fr 54px; gap: 8px; }
+    .hero .value { font-size: 48px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>SIMBA 2.1 validation</h1>
+      <p class="sub" id="phase"></p>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap">
+      <div class="meta" id="meta"></div>
+      <button class="theme-toggle" id="theme" type="button">Toggle theme</button>
+    </div>
+  </header>
+
+  <div class="grid-top">
+    <div class="card hero" id="hero"></div>
+    <div class="tiles" id="tiles"></div>
+  </div>
+
+  <div class="grid-charts">
+    <div class="card">
+      <h2>By object group</h2>
+      <p class="sub">Share of checks passed per Statsbygg group, worst first</p>
+      <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span></div>
+      <div class="bars" id="by-group"></div>
+    </div>
+    <div class="card">
+      <h2>By property set</h2>
+      <p class="sub">Where the missing information lives, worst first</p>
+      <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span></div>
+      <div class="bars" id="by-pset"></div>
+    </div>
+  </div>
+
+  <div class="card section">
+    <div class="section-head">
+      <div>
+        <h2>Requirements</h2>
+        <p class="sub">Every mandatory requirement that applies to objects in the model</p>
+      </div>
+      <div class="filters">
+        <select id="f-status" aria-label="Status">
+          <option value="fail">Failing</option>
+          <option value="pass">Passing</option>
+          <option value="all">All statuses</option>
+        </select>
+        <select id="f-group" aria-label="Object group"></select>
+        <select id="f-fix" aria-label="How to fix">
+          <option value="all">Any fix</option>
+          <option value="tool">Fixable in this tool</option>
+          <option value="manual">Authoring tool only</option>
+        </select>
+        <input id="f-search" type="search" placeholder="Search requirement" aria-label="Search requirement">
+      </div>
+    </div>
+    <div class="table-wrap"><table id="req-table"></table></div>
+    <div class="count" id="req-count"></div>
+  </div>
+
+  <div class="card section">
+    <div class="section-head">
+      <div>
+        <h2>Objects with most issues</h2>
+        <p class="sub">Each object's failing requirements</p>
+      </div>
+      <div class="filters">
+        <select id="o-class" aria-label="IFC class"></select>
+        <input id="o-search" type="search" placeholder="Search name or GlobalId" aria-label="Search objects">
+      </div>
+    </div>
+    <div class="table-wrap"><table id="obj-table"></table></div>
+    <div class="count" id="obj-count"></div>
+  </div>
+</main>
+<div id="tooltip" role="tooltip"></div>
+
+<script>
+const DATA = /*DATA*/null;
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n.toLocaleString("en-US");
+const pct = (part, whole) => whole ? Math.round((part / whole) * 1000) / 10 : 0;
+function el(tag, attrs = {}, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs)) {
+    if (key === "style") node.style.cssText = value;
+    else if (key === "text") node.textContent = value;
+    else node.setAttribute(key, value);
+  }
+  for (const child of children) if (child != null) node.append(child);
+  return node;
+}
+
+// ---------- Theme ----------
+(function () {
+  let stored = null;
+  try { stored = localStorage.getItem("simba-theme"); } catch (e) {}
+  if (stored) document.documentElement.dataset.theme = stored;
+  $("theme").addEventListener("click", () => {
+    const current = document.documentElement.dataset.theme
+      || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+    const next = current === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("simba-theme", next); } catch (e) {}
+  });
+})();
+
+// ---------- Tooltip ----------
+const tooltip = $("tooltip");
+function showTip(event, html) {
+  tooltip.innerHTML = html;
+  tooltip.style.opacity = 1;
+  const rect = tooltip.getBoundingClientRect();
+  let x = event.clientX + 14, y = event.clientY + 14;
+  if (x + rect.width > innerWidth - 8) x = event.clientX - rect.width - 14;
+  if (y + rect.height > innerHeight - 8) y = event.clientY - rect.height - 14;
+  tooltip.style.left = Math.max(8, x) + "px";
+  tooltip.style.top = Math.max(8, y) + "px";
+}
+function hideTip() { tooltip.style.opacity = 0; }
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+// ---------- Derived numbers ----------
+const reqs = DATA.requirements;
+const checks = reqs.reduce((a, r) => a + r.passed + r.failed, 0);
+const passedChecks = reqs.reduce((a, r) => a + r.passed, 0);
+const failingReqs = reqs.filter((r) => r.failed > 0);
+const manualReqs = failingReqs.filter((r) => !r.fixable);
+const objectsWithIssues = DATA.objects.filter((o) => o.failed.length > 0);
+
+// ---------- Header ----------
+$("phase").textContent = DATA.phase;
+const meta = $("meta");
+meta.append(el("span", {}, "Model ", el("b", { text: DATA.model })));
+const schemaBadge = el("span", { class: "badge" },
+  el("span", { class: "dot", style: `background:${DATA.schema === "IFC4" ? "var(--good)" : "var(--warning)"}` }),
+  DATA.schema === "IFC4" ? "IFC4" : `${DATA.schema} — Statsbygg requires IFC4`);
+meta.append(schemaBadge);
+meta.append(el("span", { text: DATA.generated }));
+
+// ---------- Hero + tiles ----------
+const rate = pct(passedChecks, checks);
+const hero = $("hero");
+hero.append(el("div", { class: "label sub", text: "Checks passed" }));
+hero.append(el("div", { class: "value", text: `${rate}%` }));
+const heroNote = el("div", { class: "sub" }, `${fmt(passedChecks)} of ${fmt(checks)} checks`);
+if (DATA.before) {
+  const gained = passedChecks - DATA.before.passed;
+  if (gained > 0) heroNote.append(" · ", el("span", { class: "delta-good", text: `+${fmt(gained)} after changes` }));
+}
+hero.append(heroNote);
+hero.append(el("div", { class: "seg", "aria-hidden": "true" },
+  el("span", { style: `flex:${passedChecks};background:var(--good)` }),
+  el("span", { style: `flex:${checks - passedChecks};background:var(--critical)` })));
+
+const tiles = [
+  ["Requirements failing", fmt(failingReqs.length), `of ${fmt(reqs.length)} that apply`],
+  ["Objects with issues", fmt(objectsWithIssues.length), `of ${fmt(DATA.objects.length)} checked`],
+  ["Fixable in this tool", fmt(failingReqs.length - manualReqs.length), "missing properties and attributes"],
+  ["Authoring tool only", fmt(manualReqs.length), "type, predefined type, georeference"],
+];
+for (const [label, value, note] of tiles) {
+  $("tiles").append(el("div", { class: "card tile" },
+    el("div", { class: "label", text: label }), el("div", { class: "value", text: value }), el("div", { class: "note", text: note })));
+}
+
+// ---------- Bar charts ----------
+function aggregate(keyFn) {
+  const map = new Map();
+  for (const r of reqs) {
+    const key = keyFn(r);
+    const entry = map.get(key) || { name: key, passed: 0, failed: 0, reqs: 0, failingReqs: 0 };
+    entry.passed += r.passed; entry.failed += r.failed; entry.reqs += 1; entry.failingReqs += r.failed > 0;
+    map.set(key, entry);
+  }
+  return [...map.values()].sort((a, b) =>
+    (b.failed / (b.passed + b.failed)) - (a.failed / (a.passed + a.failed)) || b.failed - a.failed);
+}
+
+function renderBars(container, rows, limit = 10) {
+  let expanded = false;
+  function draw() {
+    container.replaceChildren();
+    const shown = expanded ? rows : rows.slice(0, limit);
+    for (const row of shown) {
+      const total = row.passed + row.failed;
+      const node = el("div", { class: "bar-row", tabindex: "0",
+          "aria-label": `${row.name}: ${row.failed} of ${total} checks failed` },
+        el("div", { class: "name", text: row.name }),
+        el("div", { class: "track" },
+          row.passed ? el("span", { style: `flex:${row.passed};background:var(--good)` }) : null,
+          row.failed ? el("span", { style: `flex:${row.failed};background:var(--critical)` }) : null),
+        el("div", { class: "num", text: `${pct(row.passed, total)}%` }));
+      const tip = `<b>${esc(row.name)}</b><br>${fmt(row.passed)} passed · ${fmt(row.failed)} failed<br>` +
+        `${row.failingReqs} of ${row.reqs} requirements failing`;
+      node.addEventListener("mousemove", (e) => showTip(e, tip));
+      node.addEventListener("mouseleave", hideTip);
+      node.addEventListener("focus", () => { const r = node.getBoundingClientRect(); showTip({ clientX: r.right - 80, clientY: r.bottom }, tip); });
+      node.addEventListener("blur", hideTip);
+      container.append(node);
+    }
+    if (rows.length > limit) {
+      const button = el("button", { class: "link-btn", type: "button",
+        text: expanded ? "Show fewer" : `Show all ${rows.length}` });
+      button.addEventListener("click", () => { expanded = !expanded; draw(); });
+      container.append(el("div", { class: "more" }, button));
+    }
+  }
+  draw();
+}
+
+renderBars($("by-group"), aggregate((r) => r.group));
+renderBars($("by-pset"), aggregate((r) => r.pset || "Attributes (Name, Description …)"));
+
+// ---------- Requirements table ----------
+const groups = [...new Set(reqs.map((r) => r.group))].sort();
+$("f-group").append(el("option", { value: "", text: "All groups" }), ...groups.map((g) => el("option", { value: g, text: g })));
+if (!failingReqs.length) $("f-status").value = "all";
+
+const reqColumns = [
+  { key: "status", label: "Status", sort: (r) => r.failed > 0 ? 1 : 0 },
+  { key: "group", label: "Group", sort: (r) => r.group },
+  { key: "label", label: "Requirement", sort: (r) => r.label },
+  { key: "type", label: "Value type", sort: (r) => r.type || "" },
+  { key: "failed", label: "Failed", num: true, sort: (r) => r.failed },
+  { key: "total", label: "Objects", num: true, sort: (r) => r.passed + r.failed },
+  { key: "fix", label: "Fix in", sort: (r) => r.fixable ? 0 : 1 },
+];
+let reqSort = { key: "failed", dir: -1 };
+
+function statusCell(failed) {
+  return el("span", { class: "status" },
+    el("span", { class: "icon", style: `background:${failed ? "var(--critical)" : "var(--good)"}`, "aria-hidden": "true", text: failed ? "✕" : "✓" }),
+    failed ? "Failing" : "Passing");
+}
+
+function headerRow(columns, state, onSort) {
+  return el("tr", {}, ...columns.map((c) => {
+    const th = el("th", { class: (c.num ? "num " : "") + (c.sort ? "sortable" : ""), scope: "col" }, c.label);
+    if (c.sort) {
+      if (state.key === c.key) th.append(el("span", { class: "arrow", text: state.dir < 0 ? "↓" : "↑" }));
+      th.addEventListener("click", () => onSort(c.key));
+    }
+    return th;
+  }));
+}
+
+function sortRows(rows, columns, state) {
+  const col = columns.find((c) => c.key === state.key);
+  return rows.sort((a, b) => {
+    const x = col.sort(a), y = col.sort(b);
+    return (x < y ? -1 : x > y ? 1 : 0) * state.dir;
+  });
+}
+
+function renderRequirements() {
+  const status = $("f-status").value, group = $("f-group").value, fix = $("f-fix").value;
+  const query = $("f-search").value.trim().toLowerCase();
+  let rows = reqs.filter((r) =>
+    (status === "all" || (status === "fail") === (r.failed > 0)) &&
+    (!group || r.group === group) &&
+    (fix === "all" || (fix === "tool") === r.fixable) &&
+    (!query || r.label.toLowerCase().includes(query)));
+  rows = sortRows(rows, reqColumns, reqSort);
+
+  const table = $("req-table");
+  table.replaceChildren(el("thead", {}, headerRow(reqColumns, reqSort, (key) => {
+    reqSort = { key, dir: reqSort.key === key ? -reqSort.dir : (key === "failed" || key === "total" ? -1 : 1) };
+    renderRequirements();
+  })));
+  const body = el("tbody");
+  for (const r of rows) {
+    const total = r.passed + r.failed;
+    body.append(el("tr", {},
+      el("td", {}, statusCell(r.failed > 0)),
+      el("td", { text: r.group }),
+      el("td", {}, r.label),
+      el("td", { class: "mono", text: r.type || "—" }),
+      el("td", { class: "num" }, fmt(r.failed),
+        el("div", { class: "meter", style: "margin-left:auto", "aria-hidden": "true" },
+          r.passed ? el("span", { style: `flex:${r.passed};background:var(--good)` }) : null,
+          r.failed ? el("span", { style: `flex:${r.failed};background:var(--critical)` }) : null)),
+      el("td", { class: "num", text: fmt(total) }),
+      el("td", {}, el("span", { class: "tag", text: r.fixable ? "This tool" : "Authoring tool" }))));
+  }
+  if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: reqColumns.length, text: "No requirements match these filters" })));
+  table.append(body);
+  $("req-count").textContent = `Showing ${rows.length} of ${reqs.length} requirements`;
+}
+["f-status", "f-group", "f-fix"].forEach((id) => $(id).addEventListener("change", renderRequirements));
+$("f-search").addEventListener("input", renderRequirements);
+renderRequirements();
+
+// ---------- Objects table ----------
+const classes = [...new Set(DATA.objects.map((o) => o.cls))].sort();
+$("o-class").append(el("option", { value: "", text: "All classes" }), ...classes.map((c) => el("option", { value: c, text: c })));
+const OBJECT_LIMIT = 100;
+
+function renderObjects() {
+  const cls = $("o-class").value, query = $("o-search").value.trim().toLowerCase();
+  const rows = objectsWithIssues
+    .filter((o) => (!cls || o.cls === cls) &&
+      (!query || (o.name || "").toLowerCase().includes(query) || (o.id || "").toLowerCase().includes(query)))
+    .sort((a, b) => b.failed.length - a.failed.length || (a.name || "").localeCompare(b.name || ""));
+
+  const table = $("obj-table");
+  table.replaceChildren(el("thead", {}, el("tr", {},
+    el("th", { scope: "col", text: "IFC class" }), el("th", { scope: "col", text: "Name" }),
+    el("th", { scope: "col", text: "GlobalId" }), el("th", { class: "num", scope: "col", text: "Failed" }),
+    el("th", { scope: "col", text: "Failing requirements" }))));
+  const body = el("tbody");
+  for (const o of rows.slice(0, OBJECT_LIMIT)) {
+    const list = o.failed.slice(0, 4).join(", ") + (o.failed.length > 4 ? ` +${o.failed.length - 4} more` : "");
+    const cell = el("td", { class: "fails", text: list });
+    if (o.failed.length > 4) cell.title = o.failed.join("\n");
+    body.append(el("tr", {},
+      el("td", { text: o.cls }), el("td", { text: o.name || "—" }), el("td", { class: "mono", text: o.id || "—" }),
+      el("td", { class: "num", text: `${o.failed.length} / ${o.total}` }), cell));
+  }
+  if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: 5, text: objectsWithIssues.length ? "No objects match these filters" : "Every object passes" })));
+  table.append(body);
+  $("obj-count").textContent = rows.length > OBJECT_LIMIT
+    ? `Showing the ${OBJECT_LIMIT} worst of ${fmt(rows.length)} objects — the CSV report has all of them`
+    : `Showing ${fmt(rows.length)} objects`;
+}
+$("o-class").addEventListener("change", renderObjects);
+$("o-search").addEventListener("input", renderObjects);
+renderObjects();
+</script>
+</body>
+</html>

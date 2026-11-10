@@ -2,7 +2,7 @@
 
 Checks an IFC model against Statsbygg's SIMBA 2.1 requirements for architects (ARK) and helps fill in what is missing.
 
-The requirements are read from Statsbygg's mvdXML files in this folder. The tool has no property names written into it, so a new release of the mvdXML files can be dropped in without changing the code.
+The requirements are read from Statsbygg's mvdXML files in the `Simba Rules` folder. The tool has no property names written into it, so a new release of the mvdXML files can be dropped in without changing the code.
 
 ## What it does
 
@@ -12,22 +12,26 @@ The requirements are read from Statsbygg's mvdXML files in this folder. The tool
 4. **Fills in missing values:** missing properties and attributes, with the value type checked as you type.
 5. **Saves** the result as a new IFC file. The original file is never changed.
 
+## Installation
+
+```bash
+git clone https://github.com/bmtalves/Validation_Simba.git
+cd Validation_Simba
+pip install ifcopenshell pytest
+```
+
 ## Requirements
 
 - Python 3.10 or newer
 - [IfcOpenShell](https://ifcopenshell.org/) (tested with 0.7.10)
 - pytest (only for running the tests)
 
-```bash
-pip install ifcopenshell pytest
-```
-
 ## Usage
 
 Run from this folder:
 
 ```bash
-python project.py model.ifc
+python Validation_Simba.py model.ifc
 ```
 
 The tool lists every phase found in the mvdXML files and asks which to check against:
@@ -43,7 +47,7 @@ Validate against (1-10):
 To use one specific rules file instead of all four:
 
 ```bash
-python project.py model.ifc rules.mvdxml
+python Validation_Simba.py model.ifc rules.mvdxml
 ```
 
 ### The steps
@@ -84,7 +88,7 @@ Values are always written on the object itself, never on its type, so other obje
 - **Requirements:** a table you can filter by status, group and fix type, search, and sort.
 - **Objects with most issues:** each object's class, name, GlobalId and failing requirements, with filters for class and name/GlobalId.
 
-It follows the system light/dark mode and has its own theme toggle. See `example dashboard house B5.1.1.html`.
+It follows the system light/dark mode and has its own theme toggle.
 
 ## What is checked
 
@@ -111,22 +115,25 @@ Requirements that can't be fixed here are listed at the end as *"Has to be fixed
 
 ## Files
 
-| File | Purpose |
-|---|---|
-| `project.py` | The tool |
-| `dashboard_template.html` | Layout of the HTML dashboard. Must stay next to `project.py`. |
-| `test_project.py` | Tests |
-| `statsbygg-template-simba-2-1-…_b3-1_architect-ark.mvdxml` | Rules for B3.1 Skisseprosjekt |
-| `statsbygg-template-simba-2-1-…_b3-2_architect-ark.mvdxml` | Rules for B3.2 Forprosjekt |
-| `statsbygg-template-simba-2-1-…_b4-1_architect-ark.mvdxml` | Rules for B4.1 Detaljprosjekt |
-| `statsbygg-template-simba-2-1-…_b5-1_architect-ark.mvdxml` | Rules for B5.1 Ferdigstillelse |
+```
+Validation_Simba/
+├── Validation_Simba.py           the tool
+├── dashboard_template.html       layout of the HTML dashboard (must stay next to Validation_Simba.py)
+├── test_validation_simba.py      tests
+├── README.md
+└── Simba Rules/
+    ├── statsbygg-template-simba-2-1-…_b3-1_architect-ark.mvdxml   B3.1 Skisseprosjekt
+    ├── statsbygg-template-simba-2-1-…_b3-2_architect-ark.mvdxml   B3.2 Forprosjekt
+    ├── statsbygg-template-simba-2-1-…_b4-1_architect-ark.mvdxml   B4.1 Detaljprosjekt
+    └── statsbygg-template-simba-2-1-…_b5-1_architect-ark.mvdxml   B5.1 Ferdigstillelse
+```
 
-Any other `*.mvdxml` file placed in this folder is picked up automatically.
+Every `*.mvdxml` file in `Simba Rules` (or next to `Validation_Simba.py`) is picked up automatically.
 
 ## Tests
 
 ```bash
-python -m pytest test_project.py
+python -m pytest test_validation_simba.py
 ```
 
 The tests build small IFC4 models in memory and cover:
@@ -139,6 +146,7 @@ The tests build small IFC4 models in memory and cover:
 - writing fixes
 - copying old status values
 - the dashboard data
+- finding the rules files
 
 ## Limitations
 
