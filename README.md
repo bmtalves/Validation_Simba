@@ -78,6 +78,26 @@ Measures are entered in the model's own units.
 
 Values are always written on the object itself, never on its type, so other objects that share the type are not changed.
 
+## Allowed values
+
+The Statsbygg mvdXML files only require text properties such as `ProcessStatus` or `FireRating` to be filled in. They don't say which values are allowed. You can add those lists yourself in `allowed_values.csv`:
+
+```csv
+Property,Allowed values,Source
+NONS_Process.ProcessStatus,000;100;125;150;175;200;225;250;275;300;325;350;375;400;425;450;475;500;600,MMI codes
+NONS_Process.DuplicateOwnedBy,ARK;RIB;RIV;RIE;LARK,Discipline codes
+NONS_Thermal.ThermalTransmittanceReq,"re:\d+([.,]\d+)?",U-value as a number
+```
+
+- **Format:** one property per line as `PsetName.PropertyName`, with allowed values separated by `;`.
+- **Patterns:** `re:` starts a pattern (a Python regular expression) that the whole value must match. Put a cell in double quotes if it contains a comma.
+- **Comments:** lines starting with `#` are ignored.
+- **Shipped lists:** `NONS_Process.ProcessStatus` is limited to MMI codes, following SIMBA 2.1 Veiledning B.3.1. A primary code is a whole hundred (e.g. 200 Ferdig konsept, 300 Underlag for detaljering, 400 Produksjonsunderlag). A secondary code adds x25 etablert for kontroll, x50 kontrollert or x75 akseptert, e.g. `250`. The other lines are commented-out examples.
+- **Validation:** a value that isn't on the list fails the requirement, just like a missing value. This applies whether the value is on the object or on its type.
+- **Filling in:** the tool shows the allowed values and only accepts those. Capitalisation doesn't matter when typing; the value is saved exactly as listed.
+
+Measures are also checked against IFC's own limits: `IFCPOSITIVELENGTHMEASURE` must be above 0 and `IFCNORMALISEDRATIOMEASURE` between 0 and 1.
+
 ## The dashboard
 
 `validation <model> <phase>.html` is a single file that works offline and can be shared as it is. It shows:
@@ -97,6 +117,7 @@ Each mvdXML file has *concept roots* (object groups such as `200 Wall`), each wi
 | Rule | Example | Fixable here |
 |---|---|---|
 | Property exists with the right value type | `Pset_WallCommon.IsExternal` as `IFCBOOLEAN` | Yes |
+| Property value is allowed | values listed in `allowed_values.csv`; measures within IFC's limits | Yes |
 | Attribute is filled in | `Name`, `Description`, `LongName`, `LandTitleNumber` | Yes |
 | Predefined type is set | `PredefinedType` on the object or its type | No |
 | Object has a type | `IfcWallType` assigned | No |
@@ -119,6 +140,7 @@ Requirements that can't be fixed here are listed at the end as *"Has to be fixed
 Validation_Simba/
 ├── Validation_Simba.py           the tool
 ├── dashboard_template.html       layout of the HTML dashboard (must stay next to Validation_Simba.py)
+├── allowed_values.csv            your lists of allowed values (optional)
 ├── test_validation_simba.py      tests
 ├── README.md
 └── Simba Rules/
@@ -146,10 +168,11 @@ The tests build small IFC4 models in memory and cover:
 - writing fixes
 - copying old status values
 - the dashboard data
+- allowed values and measure limits
 - finding the rules files
 
 ## Limitations
 
-- **Status values:** only the existence and value type of a property are checked, not specific allowed values. For example, the tool doesn't check whether ProcessStatus uses Statsbygg's exact wording.
+- **Allowed values have to be added by hand:** Statsbygg's mvdXML files contain no value lists, so text properties are only checked against the lists you put in `allowed_values.csv`.
 - **Old date not copied:** `NOSSB_Process.DesignedStatusDate` has no equivalent in SIMBA 2.1.
 - **Rule syntax:** only the mvdXML rule syntax used in the Statsbygg files is supported, not the full mvdXML standard.

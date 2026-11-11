@@ -1,0 +1,8 @@
+Property,Allowed values,Source
+# One property per line as PsetName.PropertyName. Separate allowed values with ; (semicolon).,,
+# A value starting with re: is a pattern (Python regular expression) the whole value must match.,,
+# Put a cell in "double quotes" if it contains a comma.,,
+# Lines starting with # are ignored. Remove the # to switch a line on.,,
+NONS_Process.ProcessStatus,000;100;125;150;175;200;225;250;275;300;325;350;375;400;425;450;475;500;600,"MMI codes (SIMBA 2.1 Veiledning B.3.1): primary code in whole hundreds, optionally with secondary code x25/x50/x75"
+# NONS_Process.DuplicateOwnedBy,ARK;RIB;RIV;RIE;LARK,Examples from the SIMBA definition - the list is not complete
+# NONS_Thermal.ThermalTransmittanceReq,"re:\d+([.,]\d+)?",U-value in W/(m2K) as a number

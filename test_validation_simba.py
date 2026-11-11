@@ -3,7 +3,12 @@ import ifcopenshell
 import ifcopenshell.api
 
 from Validation_Simba import Atom, Checker, find_fix, get_arguments, make_label, parse_parameters, parse_value, apply_fix, find_old_status
-from Validation_Simba import Concept, validate, dashboard_data, find_rule_files
+from Validation_Simba import Concept, validate, dashboard_data, find_rule_files, load_allowed_values
+
+PROCESS_STATUS = ("rule", parse_parameters(
+    "Set[Value]='NONS_Process' AND PropertyName[Value]='ProcessStatus' AND Value[Exists]=TRUE AND Value[Type]='IFCLABEL'"))
+TILE_WIDTH = ("rule", parse_parameters(
+    "Set[Value]='Pset_CoveringCeiling' AND PropertyName[Value]='TileWidth' AND Value[Exists]=TRUE AND Value[Type]='IFCPOSITIVELENGTHMEASURE'"))
 
 
 def make_model():
@@ -98,6 +103,54 @@ def test_dashboard_data():
                                      "type": "IFCBOOLEAN", "fixable": True, "passed": 1, "failed": 1}]
     failed = {o["name"]: o["failed"] for o in data["objects"]}
     assert failed == {"AVA.001": [], "AVA.002": ["Pset_WallCommon.IsExternal"]}
+
+
+def test_load_allowed_values(tmp_path):
+    path = tmp_path / "allowed_values.csv"
+    path.write_text(
+        "Property,Allowed values,Source\n"
+        "# NONS_Process.DuplicateOwnedBy,ARK;RIB,commented out\n"
+        "NONS_Process.ProcessStatus, A ; B ,\n"
+        "NONS_Thermal.ThermalTransmittanceReq,\"re:\\d+([.,]\\d+)?\",\n"
+        "NONS_Process.ConstructedStatus,,empty list is ignored\n",
+        encoding="utf-8")
+    allowed = load_allowed_values(path)
+    assert allowed[("NONS_Process", "ProcessStatus")] == ["A", "B"]
+    assert allowed[("NONS_Thermal", "ThermalTransmittanceReq")][0].pattern == r"\d+([.,]\d+)?"
+    assert len(allowed) == 2
+    assert load_allowed_values(tmp_path / "missing.csv") == {}
+
+
+def test_allowed_values_checked():
+    model, typed_wall, lone_wall = make_model()
+    apply_fix(model, typed_wall, ("property", "NONS_Process", "ProcessStatus", "IFCLABEL"), "Godkjent")
+    apply_fix(model, lone_wall, ("property", "NONS_Process", "ProcessStatus", "IFCLABEL"), "350")
+    allowed = {("NONS_Process", "ProcessStatus"): ["Godkjent", "Til godkjenning"]}
+    assert Checker(model, allowed).evaluate(PROCESS_STATUS, typed_wall) == True
+    assert Checker(model, allowed).evaluate(PROCESS_STATUS, lone_wall) == False
+    # Without a list any filled-in text passes, as before
+    assert Checker(model).evaluate(PROCESS_STATUS, lone_wall) == True
+
+
+def test_measure_range_checked():
+    model, typed_wall, lone_wall = make_model()
+    apply_fix(model, typed_wall, ("property", "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE"), 600.0)
+    apply_fix(model, lone_wall, ("property", "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE"), -5.0)
+    checker = Checker(model)
+    assert checker.evaluate(TILE_WIDTH, typed_wall) == True
+    assert checker.evaluate(TILE_WIDTH, lone_wall) == False
+
+
+def test_parse_value_with_allowed_values():
+    import re
+    allowed = ["Godkjent", "Til godkjenning"]
+    assert parse_value("godkjent", "IFCLABEL", allowed) == "Godkjent"
+    with pytest.raises(ValueError):
+        parse_value("350", "IFCLABEL", allowed)
+    pattern = [re.compile(r"\d+([.,]\d+)?")]
+    assert parse_value("0,18", "IFCLABEL", pattern) == "0,18"
+    with pytest.raises(ValueError):
+        parse_value("about 0.2", "IFCLABEL", pattern)
 
 
 def test_parse_value():

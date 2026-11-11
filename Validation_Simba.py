@@ -17,6 +17,7 @@ TOOL_FOLDER = Path(__file__).resolve().parent
 # Rules files are read from "Simba Rules" and from the tool's own folder
 RULES_FOLDERS = [TOOL_FOLDER / "Simba Rules", TOOL_FOLDER]
 DASHBOARD_TEMPLATE = TOOL_FOLDER / "dashboard_template.html"
+ALLOWED_VALUES_FILE = TOOL_FOLDER / "allowed_values.csv"
 
 # Statsbygg fills free-text [Value] rules with example values ('1234567', 'Building name'),
 # so for these attributes a [Value] rule only means "must be filled in"
@@ -63,9 +64,12 @@ def main():
         print(f"Warning: Statsbygg requires IFC4, this model is {model.schema}")
 
     concepts, phase = choose_exchange_requirement([rules_path] if rules_path else find_rule_files(RULES_FOLDERS))
+    allowed = load_allowed_values(ALLOWED_VALUES_FILE)
+    if allowed:
+        print(f"Checking allowed values for {len(allowed)} properties from {ALLOWED_VALUES_FILE.name}")
     changed = migrate_designed_status(model)
 
-    results = validate(model, concepts)
+    results = validate(model, concepts, allowed)
     print_summary(results)
 
     report_name = f"validation {Path(model_path).stem} {phase.split()[0]}"
@@ -79,8 +83,8 @@ def main():
     fixable = any(not r.passed and r.concept.fix for r in results)
     if fixable and ask_yes_no("Fill in missing values now?"):
         passed_before = sum(r.passed for r in results)
-        fix_failures(model, results)
-        results = validate(model, concepts)
+        fix_failures(model, results, allowed)
+        results = validate(model, concepts, allowed)
         print("\nAfter changes:")
         print_summary(results)
         changed = True
@@ -216,8 +220,9 @@ def make_label(name, fix):
 # ---------- Checking the model ----------
 
 class Checker:
-    def __init__(self, model):
+    def __init__(self, model, allowed=None):
         self.model = model
+        self.allowed = allowed or {}
         self.positioning = positioning_facts(model)
         self._properties = {}
         self._applicable = {}
@@ -291,6 +296,15 @@ class Checker:
             if atom.metric == "Type" and (nominal is None or nominal.is_a().upper() != atom.value.upper()):
                 return False
             if atom.metric == "Value" and (nominal is None or not value_matches(nominal.wrappedValue, atom)):
+                return False
+
+        # Where the rule requires a value, it must also be a valid one
+        requires_value = any(a.key == "Value" and a.metric == "Exists" and a.value.upper() == "TRUE" for a in atoms)
+        if requires_value and nominal is not None:
+            if not in_range(nominal):
+                return False
+            allowed = self.allowed.get((names["Set"], names["PropertyName"]))
+            if allowed and not is_allowed(nominal.wrappedValue, allowed):
                 return False
         return True
 
@@ -376,8 +390,53 @@ def positioning_facts(model):
     return facts
 
 
-def validate(model, concepts):
-    checker = Checker(model)
+def in_range(nominal):
+    """IFC's own limits on measure types"""
+    ifc_type = nominal.is_a().upper()
+    value = nominal.wrappedValue
+    if "POSITIVE" in ifc_type:
+        return value > 0
+    if "NORMALISEDRATIO" in ifc_type:
+        return 0 <= value <= 1
+    return True
+
+
+def load_allowed_values(path):
+    """{(pset, property): [allowed text or re.Pattern]} from allowed_values.csv; {} if there is no file"""
+    allowed = {}
+    if not path.exists():
+        return allowed
+    with open(path, newline="", encoding="utf-8-sig") as file:
+        for row in csv.DictReader(file):
+            name = (row.get("Property") or "").strip()
+            if name.startswith("#") or "." not in name:
+                continue
+            values = []
+            for value in (row.get("Allowed values") or "").split(";"):
+                value = value.strip()
+                if value.startswith("re:"):
+                    try:
+                        values.append(re.compile(value[3:]))
+                    except re.error as error:
+                        sys.exit(f"{path.name}: invalid pattern '{value[3:]}' for {name} ({error})")
+                elif value:
+                    values.append(value)
+            if values:
+                allowed[tuple(name.split(".", 1))] = values
+    return allowed
+
+
+def is_allowed(value, allowed):
+    text = str(value)
+    return any(a.fullmatch(text) if isinstance(a, re.Pattern) else text == a for a in allowed)
+
+
+def describe_allowed(allowed):
+    return ", ".join(f"text matching {a.pattern}" if isinstance(a, re.Pattern) else a for a in allowed)
+
+
+def validate(model, concepts, allowed=None):
+    checker = Checker(model, allowed)
     results = []
     for concept in concepts:
         for element in checker.applicable_elements(concept):
@@ -523,21 +582,25 @@ def group_fixes(results):
     return fixes
 
 
-def fix_failures(model, results):
+def fix_failures(model, results, allowed=None):
+    allowed = allowed or {}
     for (entity, fix), (label, elements) in group_fixes(results).items():
+        choices = allowed.get((fix[1], fix[2])) if fix[0] == "property" else None
         print(f"\n{entity}: {label} ({fix_type(fix)}) missing or invalid on {len(elements)} object(s)")
+        if choices:
+            print(f"  Allowed: {describe_allowed(choices)}")
         choice = ask_option("Fill in?", ["all", "one", "skip", "stop"])
         if choice == "stop":
             break
         if choice == "all":
-            value = ask_value(fix)
+            value = ask_value(fix, choices)
             for element in elements:
                 apply_fix(model, element, fix, value)
             print(f"Updated {len(elements)} object(s)")
         elif choice == "one":
             for element in elements:
                 print(f"  {element.is_a()} {getattr(element, 'Name', '')} ({getattr(element, 'GlobalId', '')})")
-                value = ask_value(fix, allow_skip=True)
+                value = ask_value(fix, choices, allow_skip=True)
                 if value is not None:
                     apply_fix(model, element, fix, value)
     print_manual(results)
@@ -547,7 +610,7 @@ def fix_type(fix):
     return fix[3] if fix[0] == "property" else "IFCLABEL"
 
 
-def ask_value(fix, allow_skip=False):
+def ask_value(fix, allowed=None, allow_skip=False):
     ifc_type = fix_type(fix)
     hint = ", blank to skip" if allow_skip else ""
     while True:
@@ -555,12 +618,25 @@ def ask_value(fix, allow_skip=False):
         if not text and allow_skip:
             return None
         try:
-            return parse_value(text, ifc_type)
+            return parse_value(text, ifc_type, allowed)
         except ValueError as error:
             print(f"  {error}")
 
 
-def parse_value(text, ifc_type):
+def parse_value(text, ifc_type, allowed=None):
+    value = parse_typed_value(text, ifc_type)
+    if not allowed:
+        return value
+    # Accept any capitalisation, but store the value exactly as listed
+    for option in allowed:
+        if isinstance(option, str) and option.lower() == str(value).lower():
+            return option
+    if is_allowed(value, allowed):
+        return value
+    raise ValueError(f"Must be one of: {describe_allowed(allowed)}")
+
+
+def parse_typed_value(text, ifc_type):
     ifc_type = ifc_type.upper()
     text = text.strip()
     if ifc_type in ("IFCBOOLEAN", "IFCLOGICAL"):
