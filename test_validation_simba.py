@@ -2,7 +2,8 @@ import pytest
 import ifcopenshell
 import ifcopenshell.api
 
-from Validation_Simba import Atom, Checker, find_fix, get_arguments, make_label, parse_parameters, parse_value, apply_fix, find_old_status
+import Validation_Simba
+from Validation_Simba import Atom, Checker, find_required, get_arguments, make_label, parse_parameters, write_property, find_old_status
 from Validation_Simba import Concept, validate, dashboard_data, find_rule_files, load_allowed_values
 
 PROCESS_STATUS = ("rule", parse_parameters(
@@ -44,12 +45,12 @@ def test_parse_parameters():
     assert parse_parameters("CRSName[Value]=reg'^EPSG:(.*)'") == [[Atom(False, "CRSName", "Value", "^EPSG:(.*)", True)]]
 
 
-def test_find_fix_and_label():
-    fix = find_fix(IS_EXTERNAL)
-    assert fix == ("property", "Pset_WallCommon", "IsExternal", "IFCBOOLEAN")
-    assert make_label("e2db IsExternal : 9f80 Pset_WallCommon : 200 Wall", fix) == "Pset_WallCommon.IsExternal"
-    assert find_fix(("rule", parse_parameters("LongName[Exists]=TRUE"))) == ("attribute", "LongName")
-    assert find_fix(PREDEFINED_TYPE) is None
+def test_find_required_and_label():
+    required = find_required(IS_EXTERNAL)
+    assert required == ("property", "Pset_WallCommon", "IsExternal", "IFCBOOLEAN")
+    assert make_label("e2db IsExternal : 9f80 Pset_WallCommon : 200 Wall", required) == "Pset_WallCommon.IsExternal"
+    assert find_required(("rule", parse_parameters("LongName[Exists]=TRUE"))) == ("attribute", "LongName")
+    assert find_required(PREDEFINED_TYPE) is None
     assert make_label("0004 Predefined type : 200 Wall : 01 Architectural (ARK)", None) == "Predefined type"
 
 
@@ -75,32 +76,34 @@ def test_predefined_type():
     assert checker.evaluate(PREDEFINED_TYPE, lone_wall) == False
 
 
-def test_apply_fix():
-    model, typed_wall, lone_wall = make_model()
-    apply_fix(model, lone_wall, ("property", "Pset_WallCommon", "IsExternal", "IFCBOOLEAN"), True)
-    apply_fix(model, lone_wall, ("attribute", "Description"), "Yttervegg")
-    assert Checker(model).evaluate(IS_EXTERNAL, lone_wall) == True
-    assert lone_wall.Description == "Yttervegg"
-
-
 def test_find_old_status():
     model, typed_wall, lone_wall = make_model()
-    apply_fix(model, typed_wall, ("property", "NOSSB_Process", "DesignedStatus", "IFCLABEL"), "400")
-    apply_fix(model, lone_wall, ("property", "NOSSB_Process", "DesignedStatus", "IFCLABEL"), "300")
-    apply_fix(model, lone_wall, ("property", "NONS_Process", "ProcessStatus", "IFCLABEL"), "Godkjent")
+    write_property(model, typed_wall, "NOSSB_Process", "DesignedStatus", "IFCLABEL", "400")
+    write_property(model, lone_wall, "NOSSB_Process", "DesignedStatus", "IFCLABEL", "300")
+    write_property(model, lone_wall, "NONS_Process", "ProcessStatus", "IFCLABEL", "Godkjent")
     # lone_wall already has a ProcessStatus, so it must not be overwritten
     assert find_old_status(model) == [(typed_wall, "400")]
 
 
+def test_migrate_designed_status(monkeypatch):
+    model, typed_wall, lone_wall = make_model()
+    write_property(model, typed_wall, "NOSSB_Process", "DesignedStatus", "IFCLABEL", "350")
+    monkeypatch.setattr(Validation_Simba, "ask_yes_no", lambda prompt: True)
+    assert Validation_Simba.migrate_designed_status(model) == True
+    assert Checker(model).evaluate(PROCESS_STATUS, typed_wall) == True
+    assert Checker(model).evaluate(PROCESS_STATUS, lone_wall) == False
+    # Nothing left to copy the second time
+    assert Validation_Simba.migrate_designed_status(model) == False
+
+
 def test_dashboard_data():
     model, typed_wall, lone_wall = make_model()
-    concept = Concept("200 Wall", "IfcWall", "Pset_WallCommon.IsExternal", IS_EXTERNAL, None, find_fix(IS_EXTERNAL))
+    concept = Concept("200 Wall", "IfcWall", "Pset_WallCommon.IsExternal", IS_EXTERNAL, None, find_required(IS_EXTERNAL))
     results = validate(model, [concept])
-    data = dashboard_data(results, model, "folder/model.ifc", "B5.1.1 Handover", passed_before=0)
+    data = dashboard_data(results, model, "folder/model.ifc", "B5.1.1 Handover")
     assert data["model"] == "model.ifc"
-    assert data["before"] == {"passed": 0}
     assert data["requirements"] == [{"group": "200 Wall", "label": "Pset_WallCommon.IsExternal", "pset": "Pset_WallCommon",
-                                     "type": "IFCBOOLEAN", "fixable": True, "passed": 1, "failed": 1}]
+                                     "type": "IFCBOOLEAN", "passed": 1, "failed": 1}]
     failed = {o["name"]: o["failed"] for o in data["objects"]}
     assert failed == {"AVA.001": [], "AVA.002": ["Pset_WallCommon.IsExternal"]}
 
@@ -123,46 +126,22 @@ def test_load_allowed_values(tmp_path):
 
 def test_allowed_values_checked():
     model, typed_wall, lone_wall = make_model()
-    apply_fix(model, typed_wall, ("property", "NONS_Process", "ProcessStatus", "IFCLABEL"), "Godkjent")
-    apply_fix(model, lone_wall, ("property", "NONS_Process", "ProcessStatus", "IFCLABEL"), "350")
+    write_property(model, typed_wall, "NONS_Process", "ProcessStatus", "IFCLABEL", "Godkjent")
+    write_property(model, lone_wall, "NONS_Process", "ProcessStatus", "IFCLABEL", "350")
     allowed = {("NONS_Process", "ProcessStatus"): ["Godkjent", "Til godkjenning"]}
     assert Checker(model, allowed).evaluate(PROCESS_STATUS, typed_wall) == True
     assert Checker(model, allowed).evaluate(PROCESS_STATUS, lone_wall) == False
-    # Without a list any filled-in text passes, as before
+    # Without a list any filled-in text passes
     assert Checker(model).evaluate(PROCESS_STATUS, lone_wall) == True
 
 
 def test_measure_range_checked():
     model, typed_wall, lone_wall = make_model()
-    apply_fix(model, typed_wall, ("property", "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE"), 600.0)
-    apply_fix(model, lone_wall, ("property", "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE"), -5.0)
+    write_property(model, typed_wall, "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE", 600.0)
+    write_property(model, lone_wall, "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE", -5.0)
     checker = Checker(model)
     assert checker.evaluate(TILE_WIDTH, typed_wall) == True
     assert checker.evaluate(TILE_WIDTH, lone_wall) == False
-
-
-def test_parse_value_with_allowed_values():
-    import re
-    allowed = ["Godkjent", "Til godkjenning"]
-    assert parse_value("godkjent", "IFCLABEL", allowed) == "Godkjent"
-    with pytest.raises(ValueError):
-        parse_value("350", "IFCLABEL", allowed)
-    pattern = [re.compile(r"\d+([.,]\d+)?")]
-    assert parse_value("0,18", "IFCLABEL", pattern) == "0,18"
-    with pytest.raises(ValueError):
-        parse_value("about 0.2", "IFCLABEL", pattern)
-
-
-def test_parse_value():
-    assert parse_value("yes", "IFCBOOLEAN") == True
-    assert parse_value("False", "IFCBOOLEAN") == False
-    assert parse_value("unknown", "IFCLOGICAL") == "UNKNOWN"
-    assert parse_value("0,25", "IFCTHERMALTRANSMITTANCEMEASURE") == 0.25
-    assert parse_value(" ARK ", "IFCLABEL") == "ARK"
-    for text, ifc_type in [("maybe", "IFCBOOLEAN"), ("abc", "IFCAREAMEASURE"), ("0", "IFCPOSITIVELENGTHMEASURE"),
-                           ("1.5", "IFCNORMALISEDRATIOMEASURE"), ("", "IFCLABEL")]:
-        with pytest.raises(ValueError):
-            parse_value(text, ifc_type)
 
 
 def test_find_rule_files(tmp_path):

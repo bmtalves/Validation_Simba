@@ -1,6 +1,6 @@
 # SIMBA 2.1 Validation Tool
 
-Checks an IFC model against Statsbygg's SIMBA 2.1 requirements for architects (ARK) and helps fill in what is missing.
+Checks an IFC model against Statsbygg's SIMBA 2.1 requirements for architects (ARK) and reports what is missing or wrong.
 
 The requirements are read from Statsbygg's mvdXML files in the `Simba Rules` folder. The tool has no property names written into it, so a new release of the mvdXML files can be dropped in without changing the code.
 
@@ -8,9 +8,9 @@ The requirements are read from Statsbygg's mvdXML files in the `Simba Rules` fol
 
 1. **Validates** the model against one delivery phase: B3.1 Skisseprosjekt, B3.2 Forprosjekt, B4.1 Detaljprosjekt or B5.1 Ferdigstillelse.
 2. **Reports** the results as a CSV file, an HTML dashboard, or both.
-3. **Copies old status values:** if the model still uses `NOSSB_Process.DesignedStatus`, the tool offers to copy it into the new `NONS_Process.ProcessStatus`.
-4. **Fills in missing values:** missing properties and attributes, with the value type checked as you type.
-5. **Saves** the result as a new IFC file. The original file is never changed.
+3. **Copies old status values:** if the model still uses `NOSSB_Process.DesignedStatus`, the tool offers to copy it into the new `NONS_Process.ProcessStatus`, and then saves the result as a new IFC file. The original file is never changed.
+
+The tool doesn't let you edit other values. Missing or wrong information has to be fixed in the authoring tool, using the report to find it.
 
 ## Installation
 
@@ -57,26 +57,9 @@ python Validation_Simba.py model.ifc rules.mvdxml
 | Old status values | `Copy DesignedStatus into ProcessStatus?` | Shown only if the model has `NOSSB_Process.DesignedStatus`. Objects that already have a ProcessStatus are skipped, and the old values are kept. |
 | Summary | – | One `OK` / `FAIL` line per requirement with the number of failing objects. |
 | Report | `Export a report? (csv/html dashboard/both/no)` | Files are named `validation <model> <phase>.csv` / `.html`. |
-| Fill in values | `Fill in missing values now?` | For each missing property: `all` uses one value for every failing object, `one` goes object by object (blank skips), `skip` moves on, `stop` ends this step. |
-| Updated dashboard | `Export an updated dashboard?` | Shows how many more checks pass than before. |
-| Save | `Save as new file?` | Default name is `<model>_updated.ifc`. |
+| Save | `Save as new file?` | Only shown if status values were copied. Default name is `<model>_updated.ifc`. |
 
-You can answer prompts with the first letter (`y`, `n`, `a`, `o`, `s`, `h`, …).
-
-### Entering values
-
-| Value type | Accepted input |
-|---|---|
-| `IFCBOOLEAN` | `true` / `false`, `yes` / `no`, `y` / `n`, `1` / `0` |
-| `IFCLOGICAL` | as above, plus `unknown` |
-| `IFCLABEL`, `IFCIDENTIFIER` | any non-empty text |
-| `...MEASURE` | a number; a comma or a dot works as decimal separator |
-| `IFCPOSITIVELENGTHMEASURE` | a number greater than 0 |
-| `IFCNORMALISEDRATIOMEASURE` | a number from 0 to 1 |
-
-Measures are entered in the model's own units.
-
-Values are always written on the object itself, never on its type, so other objects that share the type are not changed.
+You can answer prompts with the first letter (`y`, `n`, `c`, `h`, `b`).
 
 ## Allowed values
 
@@ -94,7 +77,6 @@ NONS_Thermal.ThermalTransmittanceReq,"re:\d+([.,]\d+)?",U-value as a number
 - **Comments:** lines starting with `#` are ignored.
 - **Shipped lists:** `NONS_Process.ProcessStatus` is limited to MMI codes, following SIMBA 2.1 Veiledning B.3.1. A primary code is a whole hundred (e.g. 200 Ferdig konsept, 300 Underlag for detaljering, 400 Produksjonsunderlag). A secondary code adds x25 etablert for kontroll, x50 kontrollert or x75 akseptert, e.g. `250`. The other lines are commented-out examples.
 - **Validation:** a value that isn't on the list fails the requirement, just like a missing value. This applies whether the value is on the object or on its type.
-- **Filling in:** the tool shows the allowed values and only accepts those. Capitalisation doesn't matter when typing; the value is saved exactly as listed.
 
 Measures are also checked against IFC's own limits: `IFCPOSITIVELENGTHMEASURE` must be above 0 and `IFCNORMALISEDRATIOMEASURE` between 0 and 1.
 
@@ -102,10 +84,10 @@ Measures are also checked against IFC's own limits: `IFCPOSITIVELENGTHMEASURE` m
 
 `validation <model> <phase>.html` is a single file that works offline and can be shared as it is. It shows:
 
-- **Checks passed:** the overall pass rate, and the improvement after changes on an updated dashboard.
-- **Summary tiles:** failing requirements, objects with issues, and how many failures can be fixed in this tool vs. need the authoring tool.
+- **Checks passed:** the overall pass rate.
+- **Summary tiles:** failing requirements, objects with issues, object groups with failures, and property sets with failures.
 - **By object group** and **By property set:** the share of checks passed, worst first. Hover a bar for details.
-- **Requirements:** a table you can filter by status, group and fix type, search, and sort.
+- **Requirements:** a table you can filter by status and group, search, and sort.
 - **Objects with most issues:** each object's class, name, GlobalId and failing requirements, with filters for class and name/GlobalId.
 
 It follows the system light/dark mode and has its own theme toggle.
@@ -114,23 +96,21 @@ It follows the system light/dark mode and has its own theme toggle.
 
 Each mvdXML file has *concept roots* (object groups such as `200 Wall`), each with *concepts* (requirements). A requirement is checked when it is marked **mandatory** for the chosen phase.
 
-| Rule | Example | Fixable here |
-|---|---|---|
-| Property exists with the right value type | `Pset_WallCommon.IsExternal` as `IFCBOOLEAN` | Yes |
-| Property value is allowed | values listed in `allowed_values.csv`; measures within IFC's limits | Yes |
-| Attribute is filled in | `Name`, `Description`, `LongName`, `LandTitleNumber` | Yes |
-| Predefined type is set | `PredefinedType` on the object or its type | No |
-| Object has a type | `IfcWallType` assigned | No |
-| Georeferencing | `IfcMapConversion` with an `EPSG:` CRS on the Body context | No |
-
-Requirements that can't be fixed here are listed at the end as *"Has to be fixed in the authoring tool"*.
+| Rule | Example |
+|---|---|
+| Property exists with the right value type | `Pset_WallCommon.IsExternal` as `IFCBOOLEAN` |
+| Property value is allowed | values listed in `allowed_values.csv`; measures within IFC's limits |
+| Attribute is filled in | `Name`, `Description`, `LongName`, `LandTitleNumber` |
+| Predefined type is set | `PredefinedType` on the object or its type |
+| Object has a type | `IfcWallType` assigned |
+| Georeferencing | `IfcMapConversion` with an `EPSG:` CRS on the Body context |
 
 ### How the rules are interpreted
 
 - **Inherited properties:** a property on the object's type counts, unless the object has the same property itself. In that case the object's own value is the one checked, so a wrong type or an empty value on the object fails even if the type is correct. This follows the `nor` rules in the mvdXML.
 - **Example values:** some Statsbygg rules contain example values, e.g. project name `'1234567'` or building name `'Building name'`. For free-text attributes these are treated as "must be filled in", not "must equal this text".
 - **`NOTDEFINED`:** a PredefinedType of `NOTDEFINED` counts as not set, so the type's PredefinedType is used, as IFC intends.
-- **Subgroups:** groups such as *Covering Ceiling*, *Covering Flooring* and *Transport Element Elevator* only apply to objects with that PredefinedType. A value you enter once is used for every group that needs it.
+- **Subgroups:** groups such as *Covering Ceiling*, *Covering Flooring* and *Transport Element Elevator* only apply to objects with that PredefinedType. An object can be checked under both the general group and its subgroup.
 - **Site requirements:** the rules only apply the site checks when the model is georeferenced with `EPSG:5555`, so models without it get no site checks.
 - **Model schema:** SIMBA 2.1 requires IFC4. Other schemas are still validated, with a warning.
 
@@ -164,8 +144,6 @@ The tests build small IFC4 models in memory and cover:
 - property inheritance from types
 - wrong value types
 - PredefinedType
-- input parsing
-- writing fixes
 - copying old status values
 - the dashboard data
 - allowed values and measure limits

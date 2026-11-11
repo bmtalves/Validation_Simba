@@ -94,7 +94,6 @@
   .tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
   .tile .note { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
   .hero .value { font-size: 56px; font-weight: 600; line-height: 1.05; margin: 8px 0 4px; letter-spacing: -0.02em; }
-  .delta-good { color: var(--good-text); font-weight: 600; }
   .seg { display: flex; gap: 2px; height: 8px; margin-top: 14px; }
   .seg span { border-radius: 999px; min-width: 0; }
 
@@ -214,11 +213,6 @@
           <option value="all">All statuses</option>
         </select>
         <select id="f-group" aria-label="Object group"></select>
-        <select id="f-fix" aria-label="How to fix">
-          <option value="all">Any fix</option>
-          <option value="tool">Fixable in this tool</option>
-          <option value="manual">Authoring tool only</option>
-        </select>
         <input id="f-search" type="search" placeholder="Search requirement" aria-label="Search requirement">
       </div>
     </div>
@@ -294,7 +288,10 @@ const reqs = DATA.requirements;
 const checks = reqs.reduce((a, r) => a + r.passed + r.failed, 0);
 const passedChecks = reqs.reduce((a, r) => a + r.passed, 0);
 const failingReqs = reqs.filter((r) => r.failed > 0);
-const manualReqs = failingReqs.filter((r) => !r.fixable);
+const groupNames = new Set(reqs.map((r) => r.group));
+const failingGroups = new Set(failingReqs.map((r) => r.group));
+const psetNames = new Set(reqs.filter((r) => r.pset).map((r) => r.pset));
+const failingPsets = new Set(failingReqs.filter((r) => r.pset).map((r) => r.pset));
 const objectsWithIssues = DATA.objects.filter((o) => o.failed.length > 0);
 
 // ---------- Header ----------
@@ -313,10 +310,6 @@ const hero = $("hero");
 hero.append(el("div", { class: "label sub", text: "Checks passed" }));
 hero.append(el("div", { class: "value", text: `${rate}%` }));
 const heroNote = el("div", { class: "sub" }, `${fmt(passedChecks)} of ${fmt(checks)} checks`);
-if (DATA.before) {
-  const gained = passedChecks - DATA.before.passed;
-  if (gained > 0) heroNote.append(" · ", el("span", { class: "delta-good", text: `+${fmt(gained)} after changes` }));
-}
 hero.append(heroNote);
 hero.append(el("div", { class: "seg", "aria-hidden": "true" },
   el("span", { style: `flex:${passedChecks};background:var(--good)` }),
@@ -325,8 +318,8 @@ hero.append(el("div", { class: "seg", "aria-hidden": "true" },
 const tiles = [
   ["Requirements failing", fmt(failingReqs.length), `of ${fmt(reqs.length)} that apply`],
   ["Objects with issues", fmt(objectsWithIssues.length), `of ${fmt(DATA.objects.length)} checked`],
-  ["Fixable in this tool", fmt(failingReqs.length - manualReqs.length), "missing properties and attributes"],
-  ["Authoring tool only", fmt(manualReqs.length), "type, predefined type, georeference"],
+  ["Object groups with failures", fmt(failingGroups.size), `of ${fmt(groupNames.size)} in the model`],
+  ["Property sets with failures", fmt(failingPsets.size), `of ${fmt(psetNames.size)} required`],
 ];
 for (const [label, value, note] of tiles) {
   $("tiles").append(el("div", { class: "card tile" },
@@ -393,7 +386,6 @@ const reqColumns = [
   { key: "type", label: "Value type", sort: (r) => r.type || "" },
   { key: "failed", label: "Failed", num: true, sort: (r) => r.failed },
   { key: "total", label: "Objects", num: true, sort: (r) => r.passed + r.failed },
-  { key: "fix", label: "Fix in", sort: (r) => r.fixable ? 0 : 1 },
 ];
 let reqSort = { key: "failed", dir: -1 };
 
@@ -423,12 +415,11 @@ function sortRows(rows, columns, state) {
 }
 
 function renderRequirements() {
-  const status = $("f-status").value, group = $("f-group").value, fix = $("f-fix").value;
+  const status = $("f-status").value, group = $("f-group").value;
   const query = $("f-search").value.trim().toLowerCase();
   let rows = reqs.filter((r) =>
     (status === "all" || (status === "fail") === (r.failed > 0)) &&
     (!group || r.group === group) &&
-    (fix === "all" || (fix === "tool") === r.fixable) &&
     (!query || r.label.toLowerCase().includes(query)));
   rows = sortRows(rows, reqColumns, reqSort);
 
@@ -449,14 +440,13 @@ function renderRequirements() {
         el("div", { class: "meter", style: "margin-left:auto", "aria-hidden": "true" },
           r.passed ? el("span", { style: `flex:${r.passed};background:var(--good)` }) : null,
           r.failed ? el("span", { style: `flex:${r.failed};background:var(--critical)` }) : null)),
-      el("td", { class: "num", text: fmt(total) }),
-      el("td", {}, el("span", { class: "tag", text: r.fixable ? "This tool" : "Authoring tool" }))));
+      el("td", { class: "num", text: fmt(total) })));
   }
   if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: reqColumns.length, text: "No requirements match these filters" })));
   table.append(body);
   $("req-count").textContent = `Showing ${rows.length} of ${reqs.length} requirements`;
 }
-["f-status", "f-group", "f-fix"].forEach((id) => $(id).addEventListener("change", renderRequirements));
+["f-status", "f-group"].forEach((id) => $(id).addEventListener("change", renderRequirements));
 $("f-search").addEventListener("input", renderRequirements);
 renderRequirements();
 

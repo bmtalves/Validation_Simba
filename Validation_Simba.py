@@ -22,7 +22,7 @@ ALLOWED_VALUES_FILE = TOOL_FOLDER / "allowed_values.csv"
 # Statsbygg fills free-text [Value] rules with example values ('1234567', 'Building name'),
 # so for these attributes a [Value] rule only means "must be filled in"
 PLACEHOLDER_ATTRIBUTES = {"Name", "LongName", "Description", "LandTitleNumber"}
-EDITABLE_ATTRIBUTES = PLACEHOLDER_ATTRIBUTES | {"ObjectType"}
+REQUIRED_ATTRIBUTES = PLACEHOLDER_ATTRIBUTES | {"ObjectType"}
 PROPERTY_KEYS = {"Set", "PropertyName", "Value"}
 POSITIONING_KEYS = {"ContextType", "ContextIdentifier", "CRSName", "HasGlobalPosition"}
 
@@ -46,7 +46,7 @@ class Concept:
     label: str       # e.g. "Pset_WallCommon.IsExternal"
     rules: tuple
     applicability: tuple | None
-    fix: tuple | None
+    required: tuple | None
     required_by: set = field(default_factory=set)
 
 
@@ -80,28 +80,15 @@ def main():
     if report in ("html dashboard", "both"):
         export_dashboard(results, model, model_path, phase, f"{report_name}.html")
 
-    fixable = any(not r.passed and r.concept.fix for r in results)
-    if fixable and ask_yes_no("Fill in missing values now?"):
-        passed_before = sum(r.passed for r in results)
-        fix_failures(model, results, allowed)
-        results = validate(model, concepts, allowed)
-        print("\nAfter changes:")
-        print_summary(results)
-        changed = True
-        if ask_yes_no("Export an updated dashboard?"):
-            export_dashboard(results, model, model_path, phase, f"{report_name} updated.html", passed_before)
-    else:
-        print_manual(results)
-
     if changed:
         save_file(model, model_path)
     else:
-        print("No changes made. Program finished.")
+        print("Program finished.")
 
 
 def get_arguments(argv):
     if len(argv) < 2:
-        sys.exit("Usage: python project.py model.ifc [rules.mvdxml]")
+        sys.exit("Usage: python Validation_Simba.py model.ifc [rules.mvdxml]")
     if len(argv) > 3:
         sys.exit("Too many arguments")
     if not argv[1].lower().endswith(".ifc"):
@@ -152,7 +139,7 @@ def load_rules(path):
             if rules_node is None:
                 continue
             rules = parse_rules(rules_node)
-            fix = find_fix(rules)
+            required = find_required(rules)
             required_by = {
                 r.get("exchangeRequirement")
                 for r in node.iterfind(f"{MVD}Requirements/{MVD}Requirement")
@@ -161,10 +148,10 @@ def load_rules(path):
             concepts.append(Concept(
                 concept_root.get("name"),
                 concept_root.get("applicableRootEntity"),
-                make_label(node.get("name"), fix),
+                make_label(node.get("name"), required),
                 rules,
                 applicability,
-                fix,
+                required,
                 required_by,
             ))
     return exchange_requirements, concepts
@@ -197,22 +184,23 @@ def iter_groups(node):
             yield from iter_groups(child)
 
 
-def find_fix(rules):
-    """What can be filled in to pass this concept: ("property", pset, name, type), ("attribute", name) or None"""
+def find_required(rules):
+    """What this concept asks for: ("property", pset, name, type), ("attribute", name), or None for
+    checks such as PredefinedType, type object and georeferencing"""
     for group in iter_groups(rules):
         own = {(a.key, a.metric): a.value for a in group if not a.on_type}
         if ("Set", "Value") in own and ("PropertyName", "Value") in own and ("Value", "Exists") in own:
             return ("property", own[("Set", "Value")], own[("PropertyName", "Value")], own.get(("Value", "Type"), "IFCLABEL"))
     for group in iter_groups(rules):
         for atom in group:
-            if not atom.on_type and atom.key in EDITABLE_ATTRIBUTES and atom.metric in ("Exists", "Value"):
+            if not atom.on_type and atom.key in REQUIRED_ATTRIBUTES and atom.metric in ("Exists", "Value"):
                 return ("attribute", atom.key)
     return None
 
 
-def make_label(name, fix):
-    if fix and fix[0] == "property":
-        return f"{fix[1]}.{fix[2]}"
+def make_label(name, required):
+    if required and required[0] == "property":
+        return f"{required[1]}.{required[2]}"
     # "0001-003 Name : 200 Wall : 01 Architectural (ARK)" -> "Name"
     return re.sub(r"^\S+\s+", "", (name or "").split(" : ")[0])
 
@@ -431,10 +419,6 @@ def is_allowed(value, allowed):
     return any(a.fullmatch(text) if isinstance(a, re.Pattern) else text == a for a in allowed)
 
 
-def describe_allowed(allowed):
-    return ", ".join(f"text matching {a.pattern}" if isinstance(a, re.Pattern) else a for a in allowed)
-
-
 def validate(model, concepts, allowed=None):
     checker = Checker(model, allowed)
     results = []
@@ -445,14 +429,6 @@ def validate(model, concepts, allowed=None):
 
 
 # ---------- Output ----------
-
-def group_failures(results):
-    failures = {}
-    for result in results:
-        if not result.passed:
-            failures.setdefault(result.concept, []).append(result.element)
-    return failures
-
 
 def print_summary(results):
     totals = {}
@@ -467,14 +443,6 @@ def print_summary(results):
 
     failed = sum(not r.passed for r in results)
     print(f"\n{len(results) - failed} of {len(results)} checks passed ({len(totals)} requirements on objects in the model)")
-
-
-def print_manual(results):
-    manual = {c: e for c, e in group_failures(results).items() if c.fix is None}
-    if manual:
-        print("\nHas to be fixed in the authoring tool:")
-        for concept, elements in manual.items():
-            print(f"  {concept.group}: {concept.label} ({len(elements)} objects)")
 
 
 def export_csv(results, filename):
@@ -492,18 +460,18 @@ def export_csv(results, filename):
             })
 
 
-def dashboard_data(results, model, model_path, phase, passed_before=None):
+def dashboard_data(results, model, model_path, phase):
     requirements = {}
     objects = {}
     for result in results:
         concept, element = result.concept, result.element
-        fix = concept.fix
+        required = concept.required
+        is_property = required is not None and required[0] == "property"
         requirement = requirements.setdefault(concept, {
             "group": concept.group,
             "label": concept.label,
-            "pset": fix[1] if fix and fix[0] == "property" else None,
-            "type": fix_type(fix) if fix else None,
-            "fixable": fix is not None,
+            "pset": required[1] if is_property else None,
+            "type": required[3] if is_property else None,
             "passed": 0,
             "failed": 0,
         })
@@ -525,24 +493,23 @@ def dashboard_data(results, model, model_path, phase, passed_before=None):
         "schema": model.schema,
         "phase": phase,
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
-        "before": {"passed": passed_before} if passed_before is not None else None,
         "requirements": list(requirements.values()),
         "objects": list(objects.values()),
     }
 
 
-def export_dashboard(results, model, model_path, phase, filename, passed_before=None):
+def export_dashboard(results, model, model_path, phase, filename):
     if not DASHBOARD_TEMPLATE.exists():
         print(f"Dashboard not saved: {DASHBOARD_TEMPLATE.name} must be in the same folder as this script")
         return
-    data = json.dumps(dashboard_data(results, model, model_path, phase, passed_before))
+    data = json.dumps(dashboard_data(results, model, model_path, phase))
     # "</" would end the <script> block early if an object name contained "</script>"
     html = DASHBOARD_TEMPLATE.read_text(encoding="utf-8").replace("/*DATA*/null", data.replace("</", "<\\/"))
     Path(filename).write_text(html, encoding="utf-8")
     print(f"Dashboard saved as {filename}")
 
 
-# ---------- Fixing ----------
+# ---------- Copying old status values ----------
 
 def find_old_status(model):
     """Objects with the pre-SIMBA 2.1 NOSSB_Process.DesignedStatus but no NONS_Process.ProcessStatus.
@@ -564,113 +531,15 @@ def migrate_designed_status(model):
     if not ask_yes_no("Copy DesignedStatus into ProcessStatus?"):
         return False
     for element, value in to_copy:
-        apply_fix(model, element, ("property", "NONS_Process", "ProcessStatus", "IFCLABEL"), value)
+        write_property(model, element, "NONS_Process", "ProcessStatus", "IFCLABEL", value)
     print(f"Copied on {len(to_copy)} object(s). The old NOSSB_Process values are kept.")
     return True
 
 
-def group_fixes(results):
-    """{(entity, fix): (label, [elements])}, so a value asked for once covers e.g. both
-    the "200 Covering" and "200 Covering Ceiling" requirements"""
-    fixes = {}
-    for result in results:
-        if not result.passed and result.concept.fix:
-            key = (result.concept.entity, result.concept.fix)
-            _, elements = fixes.setdefault(key, (result.concept.label, []))
-            if result.element not in elements:
-                elements.append(result.element)
-    return fixes
-
-
-def fix_failures(model, results, allowed=None):
-    allowed = allowed or {}
-    for (entity, fix), (label, elements) in group_fixes(results).items():
-        choices = allowed.get((fix[1], fix[2])) if fix[0] == "property" else None
-        print(f"\n{entity}: {label} ({fix_type(fix)}) missing or invalid on {len(elements)} object(s)")
-        if choices:
-            print(f"  Allowed: {describe_allowed(choices)}")
-        choice = ask_option("Fill in?", ["all", "one", "skip", "stop"])
-        if choice == "stop":
-            break
-        if choice == "all":
-            value = ask_value(fix, choices)
-            for element in elements:
-                apply_fix(model, element, fix, value)
-            print(f"Updated {len(elements)} object(s)")
-        elif choice == "one":
-            for element in elements:
-                print(f"  {element.is_a()} {getattr(element, 'Name', '')} ({getattr(element, 'GlobalId', '')})")
-                value = ask_value(fix, choices, allow_skip=True)
-                if value is not None:
-                    apply_fix(model, element, fix, value)
-    print_manual(results)
-
-
-def fix_type(fix):
-    return fix[3] if fix[0] == "property" else "IFCLABEL"
-
-
-def ask_value(fix, allowed=None, allow_skip=False):
-    ifc_type = fix_type(fix)
-    hint = ", blank to skip" if allow_skip else ""
-    while True:
-        text = input(f"  Value ({ifc_type}{hint}): ").strip()
-        if not text and allow_skip:
-            return None
-        try:
-            return parse_value(text, ifc_type, allowed)
-        except ValueError as error:
-            print(f"  {error}")
-
-
-def parse_value(text, ifc_type, allowed=None):
-    value = parse_typed_value(text, ifc_type)
-    if not allowed:
-        return value
-    # Accept any capitalisation, but store the value exactly as listed
-    for option in allowed:
-        if isinstance(option, str) and option.lower() == str(value).lower():
-            return option
-    if is_allowed(value, allowed):
-        return value
-    raise ValueError(f"Must be one of: {describe_allowed(allowed)}")
-
-
-def parse_typed_value(text, ifc_type):
-    ifc_type = ifc_type.upper()
-    text = text.strip()
-    if ifc_type in ("IFCBOOLEAN", "IFCLOGICAL"):
-        answer = text.lower()
-        if answer in ("true", "yes", "y", "1"):
-            return True
-        if answer in ("false", "no", "n", "0"):
-            return False
-        if ifc_type == "IFCLOGICAL" and answer == "unknown":
-            return "UNKNOWN"
-        raise ValueError("Answer true or false")
-    if ifc_type.endswith("MEASURE"):
-        try:
-            number = float(text.replace(",", "."))
-        except ValueError:
-            raise ValueError("Must be a number")
-        if "POSITIVE" in ifc_type and number <= 0:
-            raise ValueError("Must be greater than 0")
-        if "NORMALISEDRATIO" in ifc_type and not 0 <= number <= 1:
-            raise ValueError("Must be between 0 and 1")
-        return number
-    if not text:
-        raise ValueError("Value can't be empty")
-    return text
-
-
-def apply_fix(model, element, fix, value):
-    if fix[0] == "property":
-        _, pset_name, prop_name, ifc_type = fix
-        # Always written on the element itself, so other objects sharing its type aren't changed
-        pset = ifcopenshell.api.pset.add_pset(model, product=element, name=pset_name)
-        ifcopenshell.api.pset.edit_pset(model, pset=pset, properties={prop_name: model.create_entity(ifc_type, value)})
-    else:
-        setattr(element, fix[1], value)
+def write_property(model, element, pset_name, prop_name, ifc_type, value):
+    # Always written on the element itself, so other objects sharing its type aren't changed
+    pset = ifcopenshell.api.pset.add_pset(model, product=element, name=pset_name)
+    ifcopenshell.api.pset.edit_pset(model, pset=pset, properties={prop_name: model.create_entity(ifc_type, value)})
 
 
 # ---------- Prompts ----------
