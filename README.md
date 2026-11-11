@@ -56,7 +56,7 @@ python Validation_Simba.py model.ifc rules.mvdxml
 |---|---|---|
 | Old status values | `Copy DesignedStatus into ProcessStatus?` | Shown only if the model has `NOSSB_Process.DesignedStatus`. Objects that already have a ProcessStatus are skipped, and the old values are kept. |
 | Summary | – | One `OK` / `FAIL` line per requirement with the number of failing objects. |
-| Report | `Export a report? (csv/html dashboard/both/no)` | Files are named `validation <model> <phase>.csv` / `.html`. |
+| Report | `Export a report? (csv/html dashboard/both/no)` | Files are named `validation <model> <phase>.csv` / `.html`. The CSV has one row per object and requirement, with the value found and PASSED/FAILED. |
 | Save | `Save as new file?` | Only shown if status values were copied. Default name is `<model>_updated.ifc`. |
 
 You can answer prompts with the first letter (`y`, `n`, `c`, `h`, `b`).
@@ -88,7 +88,8 @@ Measures are also checked against IFC's own limits: `IFCPOSITIVELENGTHMEASURE` m
 - **Summary tiles:** failing requirements, objects with issues, object groups with failures, and property sets with failures.
 - **By object group** and **By property set:** the share of checks passed, worst first. Hover a bar for details.
 - **Requirements:** a table you can filter by status and group, search, and sort.
-- **Objects with most issues:** each object's class, name, GlobalId and failing requirements, with filters for class and name/GlobalId.
+- **Values:** pick a requirement (it opens on `NONS_Process.ProcessStatus`) to see every value in the model, how many objects have it, and whether it passes. Missing values are shown as *Missing*, and values of the wrong type show the type, e.g. `yes (IfcLabel)`. Click a value to list only its objects. The list shows each object's status, value, class, name, GlobalId and group, and can be filtered, searched and sorted.
+- **Objects:** each object's class, name, GlobalId and failing requirements. It shows the objects with the most issues first; switch to *All objects* to list every object checked. You can filter by class and search by name or GlobalId.
 
 It follows the system light/dark mode and has its own theme toggle.
 

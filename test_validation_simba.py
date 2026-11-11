@@ -102,10 +102,30 @@ def test_dashboard_data():
     results = validate(model, [concept])
     data = dashboard_data(results, model, "folder/model.ifc", "B5.1.1 Handover")
     assert data["model"] == "model.ifc"
-    assert data["requirements"] == [{"group": "200 Wall", "label": "Pset_WallCommon.IsExternal", "pset": "Pset_WallCommon",
-                                     "type": "IFCBOOLEAN", "passed": 1, "failed": 1}]
+    assert data["requirements"] == [{"group": "200 Wall", "label": "Pset_WallCommon.IsExternal", "index": 0,
+                                     "pset": "Pset_WallCommon", "type": "IFCBOOLEAN", "passed": 1, "failed": 1}]
     failed = {o["name"]: o["failed"] for o in data["objects"]}
     assert failed == {"AVA.001": [], "AVA.002": ["Pset_WallCommon.IsExternal"]}
+    # [object, requirement, passed, value index (-1 = missing)]
+    assert data["values"] == ["TRUE"]
+    checks = {data["objects"][obj]["name"]: (passed, value) for obj, req, passed, value in data["checks"]}
+    assert checks == {"AVA.001": (1, 0), "AVA.002": (0, -1)}
+
+
+def test_values_recorded():
+    model, typed_wall, lone_wall = make_model()
+    # Element's own wrong-typed value is shown with its type, and wins over the type's TRUE
+    write_property(model, typed_wall, "Pset_WallCommon", "IsExternal", "IFCLABEL", "yes")
+    write_property(model, lone_wall, "Pset_CoveringCeiling", "TileWidth", "IFCPOSITIVELENGTHMEASURE", 600.0)
+    checker = Checker(model)
+    is_external = Concept("200 Wall", "IfcWall", "Pset_WallCommon.IsExternal", IS_EXTERNAL, None, find_required(IS_EXTERNAL))
+    tile_width = Concept("200 Wall", "IfcWall", "Pset_CoveringCeiling.TileWidth", TILE_WIDTH, None, find_required(TILE_WIDTH))
+    predefined = Concept("200 Wall", "IfcWall", "Predefined type", PREDEFINED_TYPE, None, find_required(PREDEFINED_TYPE))
+    assert checker.value_of(is_external, typed_wall) == "yes (IfcLabel)"
+    assert checker.value_of(is_external, lone_wall) is None
+    assert checker.value_of(tile_width, lone_wall) == "600"
+    assert checker.value_of(predefined, typed_wall) == "SOLIDWALL"
+    assert checker.value_of(predefined, lone_wall) is None
 
 
 def test_load_allowed_values(tmp_path):

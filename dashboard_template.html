@@ -114,6 +114,15 @@
   .track span:last-child { border-radius: 0 4px 4px 0; }
   .track span:only-child { border-radius: 4px; }
   .more { margin-top: 8px; }
+  .bar-row.pickable { cursor: pointer; }
+  .bar-row.selected { background: var(--accent-wash); box-shadow: inset 3px 0 0 var(--accent); }
+  .values-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; margin: 20px 0 10px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);
+    border: 1px solid var(--border); border-radius: 999px; padding: 2px 4px 2px 10px;
+  }
+  .chip button { border: none; background: none; color: var(--text-muted); cursor: pointer; font: inherit; padding: 0 4px; }
+  .missing { color: var(--text-muted); font-style: italic; }
   .link-btn { background: none; border: none; color: var(--accent); font: inherit; font-size: 13px; cursor: pointer; padding: 4px 6px; }
 
   .section { margin-bottom: 16px; }
@@ -223,10 +232,41 @@
   <div class="card section">
     <div class="section-head">
       <div>
-        <h2>Objects with most issues</h2>
+        <h2>Values</h2>
+        <p class="sub">What each object has for a requirement. Click a value to list only its objects.</p>
+      </div>
+      <div class="filters">
+        <select id="v-req" aria-label="Requirement"></select>
+      </div>
+    </div>
+    <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span></div>
+    <div class="bars" id="v-dist"></div>
+    <div class="values-head">
+      <div id="v-filter-label"></div>
+      <div class="filters">
+        <select id="v-status" aria-label="Status">
+          <option value="all">All statuses</option>
+          <option value="fail">Failing</option>
+          <option value="pass">Passing</option>
+        </select>
+        <input id="v-search" type="search" placeholder="Search name, GlobalId or value" aria-label="Search objects and values">
+      </div>
+    </div>
+    <div class="table-wrap"><table id="v-table"></table></div>
+    <div class="count" id="v-count"></div>
+  </div>
+
+  <div class="card section">
+    <div class="section-head">
+      <div>
+        <h2 id="o-title">Objects with most issues</h2>
         <p class="sub">Each object's failing requirements</p>
       </div>
       <div class="filters">
+        <select id="o-show" aria-label="Which objects">
+          <option value="issues">Only with issues</option>
+          <option value="all">All objects</option>
+        </select>
         <select id="o-class" aria-label="IFC class"></select>
         <input id="o-search" type="search" placeholder="Search name or GlobalId" aria-label="Search objects">
       </div>
@@ -450,6 +490,136 @@ function renderRequirements() {
 $("f-search").addEventListener("input", renderRequirements);
 renderRequirements();
 
+// ---------- Values ----------
+const valueText = (index) => index < 0 ? null : DATA.values[index];
+const labels = [...new Set(reqs.map((r) => r.label))].sort((a, b) => a.localeCompare(b));
+const checksByLabel = new Map();
+for (const [obj, req, passed, value] of DATA.checks) {
+  const label = reqs[req].label;
+  if (!checksByLabel.has(label)) checksByLabel.set(label, new Map());
+  // One row per object, even if it is checked under two groups (e.g. Covering and Covering Ceiling)
+  const rows = checksByLabel.get(label);
+  const row = rows.get(obj) || { obj: DATA.objects[obj], groups: [], value: valueText(value), passed: true };
+  row.groups.push(reqs[req].group);
+  row.passed = row.passed && passed === 1;
+  rows.set(obj, row);
+}
+$("v-req").append(...labels.map((label) =>
+  el("option", { value: label, text: `${label} (${checksByLabel.get(label).size})` })));
+const preferred = labels.includes("NONS_Process.ProcessStatus") ? "NONS_Process.ProcessStatus"
+  : ([...reqs].filter((r) => r.pset).sort((a, b) => b.failed - a.failed)[0] || reqs[0] || {}).label;
+if (preferred) $("v-req").value = preferred;
+
+let valueFilter = undefined;  // undefined = all values, null = missing, string = that value
+let valueSort = { key: "value", dir: 1 };
+const valueColumns = [
+  { key: "status", label: "Status", sort: (r) => r.passed ? 0 : 1 },
+  { key: "value", label: "Value", sort: (r) => r.value === null ? "\uffff" : r.value },
+  { key: "cls", label: "IFC class", sort: (r) => r.obj.cls },
+  { key: "name", label: "Name", sort: (r) => r.obj.name },
+  { key: "id", label: "GlobalId", sort: (r) => r.obj.id },
+  { key: "group", label: "Group", sort: (r) => r.groups.join() },
+];
+const VALUE_LIMIT = 500;
+
+function valueRows() { return [...(checksByLabel.get($("v-req").value) || new Map()).values()]; }
+
+function pickValue(value) {
+  valueFilter = valueFilter === value ? undefined : value;
+  hideTip();
+  renderValueDistribution();
+  renderValueTable();
+}
+
+let distributionExpanded = false;
+function renderValueDistribution() {
+  const counts = new Map();
+  for (const row of valueRows()) {
+    const entry = counts.get(row.value) || { value: row.value, passed: 0, failed: 0 };
+    entry[row.passed ? "passed" : "failed"] += 1;
+    counts.set(row.value, entry);
+  }
+  const rows = [...counts.values()].sort((a, b) =>
+    (b.passed + b.failed) - (a.passed + a.failed) || String(a.value).localeCompare(String(b.value)));
+  const max = Math.max(1, ...rows.map((r) => r.passed + r.failed));
+  const container = $("v-dist");
+  container.replaceChildren();
+  for (const row of distributionExpanded ? rows : rows.slice(0, 12)) {
+    const total = row.passed + row.failed;
+    const shown = row.value === null ? "Missing" : row.value;
+    const selected = valueFilter === row.value;
+    const node = el("div", { class: "bar-row pickable" + (selected ? " selected" : ""), tabindex: "0", role: "button",
+        "aria-pressed": String(selected), "aria-label": `${shown}: ${total} objects` },
+      el("div", { class: "name" + (row.value === null ? " missing" : ""), text: shown }),
+      el("div", { class: "track", style: `width:${(total / max) * 100}%` },
+        row.passed ? el("span", { style: `flex:${row.passed};background:var(--good)` }) : null,
+        row.failed ? el("span", { style: `flex:${row.failed};background:var(--critical)` }) : null),
+      el("div", { class: "num", text: fmt(total) }));
+    const tip = `<b>${esc(shown)}</b><br>${fmt(total)} objects<br>` +
+      `${fmt(row.passed)} passed · ${fmt(row.failed)} failed<br>Click to list them`;
+    node.addEventListener("click", () => pickValue(row.value));
+    node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickValue(row.value); } });
+    node.addEventListener("mousemove", (e) => showTip(e, tip));
+    node.addEventListener("mouseleave", hideTip);
+    container.append(node);
+  }
+  if (rows.length > 12) {
+    const button = el("button", { class: "link-btn", type: "button",
+      text: distributionExpanded ? "Show fewer" : `Show all ${rows.length} values` });
+    button.addEventListener("click", () => { distributionExpanded = !distributionExpanded; renderValueDistribution(); });
+    container.append(el("div", { class: "more" }, button));
+  }
+  if (!rows.length) container.append(el("div", { class: "empty", text: "No objects for this requirement" }));
+}
+
+function renderValueTable() {
+  const status = $("v-status").value, query = $("v-search").value.trim().toLowerCase();
+  let rows = valueRows().filter((r) =>
+    (valueFilter === undefined || r.value === valueFilter) &&
+    (status === "all" || (status === "fail") === !r.passed) &&
+    (!query || [r.obj.name, r.obj.id, r.value].some((t) => (t || "").toLowerCase().includes(query))));
+  rows = sortRows(rows, valueColumns, valueSort);
+
+  const label = $("v-filter-label");
+  label.replaceChildren();
+  if (valueFilter !== undefined) {
+    const clear = el("button", { type: "button", "aria-label": "Show all values", text: "✕" });
+    clear.addEventListener("click", () => pickValue(valueFilter));
+    label.append(el("span", { class: "chip" }, `Value: ${valueFilter === null ? "Missing" : valueFilter}`, clear));
+  }
+
+  const table = $("v-table");
+  table.replaceChildren(el("thead", {}, headerRow(valueColumns, valueSort, (key) => {
+    valueSort = { key, dir: valueSort.key === key ? -valueSort.dir : 1 };
+    renderValueTable();
+  })));
+  const body = el("tbody");
+  for (const r of rows.slice(0, VALUE_LIMIT)) {
+    body.append(el("tr", {},
+      el("td", {}, statusCell(!r.passed)),
+      r.value === null ? el("td", { class: "missing", text: "Missing" }) : el("td", { text: r.value }),
+      el("td", { text: r.obj.cls }),
+      el("td", { text: r.obj.name || "—" }),
+      el("td", { class: "mono", text: r.obj.id || "—" }),
+      el("td", { text: [...new Set(r.groups)].join(", ") })));
+  }
+  if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: valueColumns.length, text: "No objects match these filters" })));
+  table.append(body);
+  $("v-count").textContent = rows.length > VALUE_LIMIT
+    ? `Showing ${VALUE_LIMIT} of ${fmt(rows.length)} objects — use the filters or the CSV report for the rest`
+    : `Showing ${fmt(rows.length)} objects`;
+}
+$("v-req").addEventListener("change", () => {
+  valueFilter = undefined;
+  distributionExpanded = false;
+  renderValueDistribution();
+  renderValueTable();
+});
+$("v-status").addEventListener("change", renderValueTable);
+$("v-search").addEventListener("input", renderValueTable);
+renderValueDistribution();
+renderValueTable();
+
 // ---------- Objects table ----------
 const classes = [...new Set(DATA.objects.map((o) => o.cls))].sort();
 $("o-class").append(el("option", { value: "", text: "All classes" }), ...classes.map((c) => el("option", { value: c, text: c })));
@@ -457,7 +627,9 @@ const OBJECT_LIMIT = 100;
 
 function renderObjects() {
   const cls = $("o-class").value, query = $("o-search").value.trim().toLowerCase();
-  const rows = objectsWithIssues
+  const showAll = $("o-show").value === "all";
+  $("o-title").textContent = showAll ? "All objects" : "Objects with most issues";
+  const rows = (showAll ? DATA.objects : objectsWithIssues)
     .filter((o) => (!cls || o.cls === cls) &&
       (!query || (o.name || "").toLowerCase().includes(query) || (o.id || "").toLowerCase().includes(query)))
     .sort((a, b) => b.failed.length - a.failed.length || (a.name || "").localeCompare(b.name || ""));
@@ -479,9 +651,10 @@ function renderObjects() {
   if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: 5, text: objectsWithIssues.length ? "No objects match these filters" : "Every object passes" })));
   table.append(body);
   $("obj-count").textContent = rows.length > OBJECT_LIMIT
-    ? `Showing the ${OBJECT_LIMIT} worst of ${fmt(rows.length)} objects — the CSV report has all of them`
+    ? `Showing the ${OBJECT_LIMIT} ${showAll ? "first" : "worst"} of ${fmt(rows.length)} objects — use the filters or the CSV report for the rest`
     : `Showing ${fmt(rows.length)} objects`;
 }
+$("o-show").addEventListener("change", renderObjects);
 $("o-class").addEventListener("change", renderObjects);
 $("o-search").addEventListener("input", renderObjects);
 renderObjects();

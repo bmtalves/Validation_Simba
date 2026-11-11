@@ -55,6 +55,7 @@ class Result:
     concept: Concept
     element: ifcopenshell.entity_instance
     passed: bool
+    value: str | None = None   # what the model has for this requirement, as text; None if missing
 
 
 def main():
@@ -296,6 +297,43 @@ class Checker:
                 return False
         return True
 
+    def value_of(self, concept, element):
+        """The value the requirement looks at, as text, or None if there is none"""
+        required = concept.required
+        if required and required[0] == "property":
+            _, pset, prop, ifc_type = required
+            # The element's own value wins over its type's, as in the rules
+            for target in (element, self.target(element, True)):
+                properties = self.properties(target).get(pset, {}) if target is not None else {}
+                if prop in properties:
+                    nominal = properties[prop]
+                    if nominal is None:
+                        return None
+                    text = display_value(nominal.wrappedValue)
+                    if nominal.is_a().upper() != ifc_type.upper():
+                        text += f" ({nominal.is_a()})"
+                    return text
+            return None
+
+        keys = {atom.key for group in iter_groups(concept.rules) for atom in group}
+        if required:
+            return display_value(attribute_value(element, required[1]))
+        if "PredefinedType" in keys:
+            value = attribute_value(element, "PredefinedType")
+            object_type = self.target(element, True)
+            if value is None:
+                value = attribute_value(object_type, "PredefinedType")
+            if value is None and object_type is not None and "TypeObject" in keys:
+                # The rule also accepts just having a type object
+                value = f"type {object_type.Name or object_type.is_a()}"
+            return display_value(value)
+        if "TypeObject" in keys:
+            object_type = self.target(element, True)
+            return display_value(object_type.Name or object_type.is_a()) if object_type else None
+        if keys & POSITIONING_KEYS:
+            return next((facts["CRSName"] for facts in self.positioning if facts["CRSName"]), None)
+        return None
+
     def target(self, element, on_type):
         if not on_type:
             return element
@@ -349,6 +387,16 @@ def attribute_value(target, key):
     if value in ("", "NOTDEFINED"):
         return None
     return value
+
+
+def display_value(value):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
 
 
 def value_matches(value, atom):
@@ -424,7 +472,7 @@ def validate(model, concepts, allowed=None):
     results = []
     for concept in concepts:
         for element in checker.applicable_elements(concept):
-            results.append(Result(concept, element, checker.evaluate(concept.rules, element)))
+            results.append(Result(concept, element, checker.evaluate(concept.rules, element), checker.value_of(concept, element)))
     return results
 
 
@@ -447,7 +495,7 @@ def print_summary(results):
 
 def export_csv(results, filename):
     with open(filename, "w", newline="", encoding="utf-8-sig") as file:
-        writer = csv.DictWriter(file, fieldnames=["GlobalId", "IfcType", "Name", "Group", "Requirement", "Validation"])
+        writer = csv.DictWriter(file, fieldnames=["GlobalId", "IfcType", "Name", "Group", "Requirement", "Value", "Validation"])
         writer.writeheader()
         for result in results:
             writer.writerow({
@@ -456,6 +504,7 @@ def export_csv(results, filename):
                 "Name": getattr(result.element, "Name", ""),
                 "Group": result.concept.group,
                 "Requirement": result.concept.label,
+                "Value": "" if result.value is None else result.value,
                 "Validation": "PASSED" if result.passed else "FAILED",
             })
 
@@ -463,6 +512,10 @@ def export_csv(results, filename):
 def dashboard_data(results, model, model_path, phase):
     requirements = {}
     objects = {}
+    values = {}
+    # One row per check, as indexes into the lists above to keep the file small:
+    # [object, requirement, passed (1/0), value (-1 if missing)]
+    checks = []
     for result in results:
         concept, element = result.concept, result.element
         required = concept.required
@@ -470,6 +523,7 @@ def dashboard_data(results, model, model_path, phase):
         requirement = requirements.setdefault(concept, {
             "group": concept.group,
             "label": concept.label,
+            "index": len(requirements),
             "pset": required[1] if is_property else None,
             "type": required[3] if is_property else None,
             "passed": 0,
@@ -481,12 +535,16 @@ def dashboard_data(results, model, model_path, phase):
             "id": getattr(element, "GlobalId", ""),
             "cls": element.is_a(),
             "name": getattr(element, "Name", None) or "",
+            "index": len(objects),
             "total": 0,
             "failed": [],
         })
         obj["total"] += 1
         if not result.passed and concept.label not in obj["failed"]:
             obj["failed"].append(concept.label)
+
+        value = -1 if result.value is None else values.setdefault(result.value, len(values))
+        checks.append([obj["index"], requirement["index"], int(result.passed), value])
 
     return {
         "model": Path(model_path).name,
@@ -495,6 +553,8 @@ def dashboard_data(results, model, model_path, phase):
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
         "requirements": list(requirements.values()),
         "objects": list(objects.values()),
+        "values": list(values),
+        "checks": checks,
     }
 
 
