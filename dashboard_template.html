@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SIMBA Validation Report</title>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
 <style>
   :root {
     color-scheme: light;
@@ -105,7 +111,8 @@
   .donut-legend .share { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); min-width: 48px; }
 
   .grid-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
-  .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 8px 0 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; color: var(--text-secondary); margin: 8px 0 14px; }
+  .legend span { white-space: nowrap; }
   .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 6px; vertical-align: -1px; }
   .bars { display: grid; gap: 2px; }
   .bar-row {
@@ -166,6 +173,35 @@
   .empty { color: var(--text-muted); padding: 20px 10px; text-align: center; }
   .count { color: var(--text-muted); font-size: 12px; margin-top: 10px; }
 
+  .viewer-wrap { display: grid; grid-template-columns: 1fr 300px; gap: 16px; }
+  .viewer {
+    position: relative; height: 540px; border-radius: 8px; overflow: hidden;
+    background: var(--page); border: 1px solid var(--border); touch-action: none;
+  }
+  .viewer canvas { display: block; cursor: grab; }
+  .viewer canvas:active { cursor: grabbing; }
+  .viewer-msg { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--text-muted); }
+  .viewer-msg[hidden] { display: none; }
+  #m-msg { pointer-events: none; place-items: start center; padding-top: 28px; }
+  .viewer.dragging { outline: 2px dashed var(--accent); outline-offset: -8px; }
+  .viewer-msg p { margin: 0 0 10px; }
+  .viewer-msg .small { font-size: 12px; margin: 10px 0 0; }
+  .file-btn {
+    display: inline-block; padding: 7px 14px; border-radius: 8px; cursor: pointer; font-size: 13px;
+    background: var(--accent); color: #fff;
+  }
+  .file-btn:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .filters button:disabled, .filters select:disabled { opacity: 0.5; cursor: default; }
+  .viewer-panel { max-height: 540px; overflow: auto; font-size: 13px; }
+  .viewer-panel p { margin: 0; }
+  .viewer-panel h3 { font-size: 15px; font-weight: 600; margin: 2px 0; overflow-wrap: anywhere; }
+  .panel-head { padding-bottom: 10px; border-bottom: 1px solid var(--grid); }
+  .panel-checks { display: grid; }
+  .panel-check { display: grid; grid-template-columns: 20px 1fr; gap: 8px; padding: 8px 4px; border-bottom: 1px solid var(--grid); overflow-wrap: anywhere; }
+  .panel-check.current { background: var(--accent-wash); }
+  .panel-check .mono { margin-top: 2px; }
+  tr.clickable { cursor: pointer; }
+
   #tooltip {
     position: fixed; pointer-events: none; z-index: 10; background: var(--tooltip-bg); color: var(--tooltip-text);
     padding: 8px 10px; border-radius: 8px; font-size: 12px; line-height: 1.5; max-width: 280px;
@@ -174,7 +210,9 @@
   #tooltip b { font-weight: 600; }
 
   @media (max-width: 860px) {
-    .grid-top, .grid-charts { grid-template-columns: 1fr; }
+    .grid-top, .grid-charts, .viewer-wrap { grid-template-columns: 1fr; }
+    .viewer { height: 380px; }
+    .viewer-panel { max-height: 360px; }
   }
   @media (max-width: 520px) {
     .filters, .filters select, .filters input { width: 100%; }
@@ -214,6 +252,39 @@
       <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span><span><i style="background:var(--warning)"></i>Missing</span></div>
       <div class="bars" id="by-pset"></div>
     </div>
+  </div>
+
+  <div class="card section" id="model-card">
+    <div class="section-head">
+      <div>
+        <h2>3D model</h2>
+        <p class="sub">Load the IFC file to see it coloured by result. Drag to rotate, right-drag to pan, scroll to zoom, click an object to see its checks.</p>
+      </div>
+      <div class="filters">
+        <select id="m-colour" aria-label="Colour by" disabled></select>
+        <select id="m-show" aria-label="Which objects" disabled>
+          <option value="all">All objects</option>
+          <option value="issues">Only not passing</option>
+        </select>
+        <button class="theme-toggle" id="m-fit" type="button" disabled>Fit view</button>
+        <button class="theme-toggle" id="m-reload" type="button" hidden>Load another file</button>
+      </div>
+    </div>
+    <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span><span><i style="background:var(--warning)"></i>Missing</span><span><i style="background:var(--axis)"></i>No requirement</span><span><i style="background:var(--accent)"></i>Selected</span></div>
+    <div class="viewer-wrap">
+      <div class="viewer" id="m-viewer">
+        <div class="viewer-msg" id="m-drop">
+          <div>
+            <p>Drop <b id="m-model-name"></b> here, or</p>
+            <label class="file-btn">Choose IFC file<input type="file" id="m-file" accept=".ifc" hidden></label>
+            <p class="muted small">The file is read in your browser. It is not uploaded anywhere.</p>
+          </div>
+        </div>
+        <div class="viewer-msg" id="m-msg" hidden></div>
+      </div>
+      <aside class="viewer-panel" id="m-panel"></aside>
+    </div>
+    <div class="count" id="m-note"></div>
   </div>
 
   <div class="card section">
@@ -365,6 +436,14 @@ const failingGroups = new Set(failingReqs.map((r) => r.group));
 const psetNames = new Set(reqs.filter((r) => r.pset).map((r) => r.pset));
 const failingPsets = new Set(failingReqs.filter((r) => r.pset).map((r) => r.pset));
 const objectsWithIssues = DATA.objects.filter((o) => o.failed.length > 0);
+
+// Clicking a table row shows that object in the 3D model, once a model is loaded
+function rowToModel(row, obj) {
+  if (!window.simbaModel || !window.simbaModel.has(obj)) return;
+  row.classList.add("clickable");
+  row.title = "Show in the 3D model";
+  row.addEventListener("click", () => window.simbaModel && window.simbaModel.focus(obj));
+}
 
 // ---------- Header ----------
 $("phase").textContent = DATA.phase;
@@ -598,6 +677,7 @@ function valueRows() { return [...(checksByLabel.get($("v-req").value) || new Ma
 function pickValue(value) {
   valueFilter = valueFilter === value ? undefined : value;
   hideTip();
+  if (window.simbaModel) window.simbaModel.follow($("v-req").value, valueFilter);
   renderValueDistribution();
   renderValueTable();
 }
@@ -664,13 +744,15 @@ function renderValueTable() {
   })));
   const body = el("tbody");
   for (const r of rows.slice(0, VALUE_LIMIT)) {
-    body.append(el("tr", {},
+    const tr = el("tr", {},
       el("td", {}, statusCell(rowStatus(r))),
       r.value === null ? el("td", { class: "missing", text: "Missing" }) : el("td", { text: r.value }),
       el("td", { text: r.obj.cls }),
       el("td", { text: r.obj.name || "—" }),
       el("td", { class: "mono", text: r.obj.id || "—" }),
-      el("td", { text: [...new Set(r.groups)].join(", ") })));
+      el("td", { text: [...new Set(r.groups)].join(", ") }));
+    rowToModel(tr, r.obj.index);
+    body.append(tr);
   }
   if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: valueColumns.length, text: "No objects match these filters" })));
   table.append(body);
@@ -680,6 +762,7 @@ function renderValueTable() {
 }
 $("v-req").addEventListener("change", () => {
   valueFilter = undefined;
+  if (window.simbaModel) window.simbaModel.follow($("v-req").value, undefined);
   distributionExpanded = false;
   renderValueDistribution();
   renderValueTable();
@@ -713,9 +796,11 @@ function renderObjects() {
     const list = o.failed.slice(0, 4).join(", ") + (o.failed.length > 4 ? ` +${o.failed.length - 4} more` : "");
     const cell = el("td", { class: "fails", text: list });
     if (o.failed.length > 4) cell.title = o.failed.join("\n");
-    body.append(el("tr", {},
+    const tr = el("tr", {},
       el("td", { text: o.cls }), el("td", { text: o.name || "—" }), el("td", { class: "mono", text: o.id || "—" }),
-      el("td", { class: "num", text: `${o.failed.length} / ${o.total}` }), cell));
+      el("td", { class: "num", text: `${o.failed.length} / ${o.total}` }), cell);
+    rowToModel(tr, o.index);
+    body.append(tr);
   }
   if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: 5, text: objectsWithIssues.length ? "No objects match these filters" : "Every object passes" })));
   table.append(body);
@@ -727,6 +812,555 @@ $("o-show").addEventListener("change", renderObjects);
 $("o-class").addEventListener("change", renderObjects);
 $("o-search").addEventListener("input", renderObjects);
 renderObjects();
+</script>
+
+<script type="module">
+// ---------- 3D model ----------
+// The IFC file is read and triangulated in the browser by IFClite (Rust/WebAssembly, MPL-2.0) and drawn
+// with three.js. Both libraries are loaded from cdn.jsdelivr.net; the IFC file itself never leaves the computer.
+const IFCLITE = "https://cdn.jsdelivr.net/npm/@ifc-lite/wasm@12.2.0/pkg/";
+// Not drawn: holes, room volumes and annotations would hide the building
+const SKIPPED = new Set(["IfcOpeningElement", "IfcSpace", "IfcAnnotation", "IfcGrid", "IfcVirtualElement"]);
+
+const objectByStep = new Map(DATA.objects.map((o) => [o.step, o.index]));
+const message = $("m-msg"), drop = $("m-drop");
+let viewer = null, loading = false;
+
+function say(text) { message.textContent = text; message.hidden = !text; }
+
+// ----- Choosing the file -----
+$("m-model-name").textContent = DATA.model;
+$("m-file").addEventListener("change", (e) => { if (e.target.files[0]) load(e.target.files[0]); e.target.value = ""; });
+$("m-reload").addEventListener("click", () => $("m-file").click());
+const viewerBox = $("m-viewer");
+viewerBox.addEventListener("dragover", (e) => { e.preventDefault(); viewerBox.classList.add("dragging"); });
+viewerBox.addEventListener("dragleave", () => viewerBox.classList.remove("dragging"));
+viewerBox.addEventListener("drop", (e) => {
+  e.preventDefault();
+  viewerBox.classList.remove("dragging");
+  const file = [...e.dataTransfer.files].find((f) => /\.ifc$/i.test(f.name));
+  if (file) load(file); else say("Drop an .ifc file");
+});
+
+async function load(file) {
+  if (loading) return;
+  loading = true;
+  drop.hidden = true;
+  const started = performance.now();
+  try {
+    say("Loading the 3D viewer …");
+    const [THREE, { OrbitControls }, ifc, wasm] = await Promise.all([
+      import("three"), import("three/addons/controls/OrbitControls.js"), import(IFCLITE + "ifc-lite.js"), compileWasm()]);
+    await ifc.default({ module_or_path: wasm });
+
+    say(`Reading ${file.name} …`);
+    let bytes = new Uint8Array(await file.arrayBuffer());
+    const problem = checkSameModel(bytes);
+    if (problem) throw new Error(problem);
+
+    if (!viewer) viewer = createViewer(THREE, OrbitControls);
+    viewer.clear();
+    // Lower detail on curved shapes (pipes, railings, round columns) keeps big models quick
+    const quality = file.size > 100e6 ? "low" : null;
+    const api = new ifc.IfcAPI();
+    let pre;
+    try {
+      pre = api.buildPrePassOnce(bytes);
+    } finally {
+      api.clearPrePassCache();
+      api.free();
+    }
+    const settings = {
+      unitScale: pre.unitScale, rtc: [pre.rtcOffset?.[0] ?? 0, pre.rtcOffset?.[1] ?? 0, pre.rtcOffset?.[2] ?? 0],
+      needsShift: Boolean(pre.needsShift), voidKeys: pre.voidKeys, voidCounts: pre.voidCounts, voidValues: pre.voidValues,
+      styleIds: pre.styleIds, styleColors: pre.styleColors, planeAngleToRadians: pre.planeAngleToRadians,
+      materialElementIds: pre.materialElementIds, materialColorCounts: pre.materialColorCounts, materialColors: pre.materialColors,
+    };
+    const total = pre.totalJobs || 0;
+    const batches = [];
+    for (let start = 0; start < total; start += BATCH) batches.push(pre.jobs.slice(start * 3, Math.min(start + BATCH, total) * 3));
+
+    let done = 0, failed = 0, lastFlush = performance.now();
+    function receive(meshes, jobCount) {
+      for (const m of meshes) {
+        if (SKIPPED.has(m.type)) continue;
+        viewer.add(objectByStep.has(m.id) ? objectByStep.get(m.id) : -1, m.positions, m.indexes, m.origin);
+      }
+      done += jobCount;
+      say(`Building the 3D model … ${Math.round((done / total) * 100)}%`);
+      // Show what's ready about twice a second, so the model appears while it loads
+      if (performance.now() - lastFlush > 500) { viewer.flush(); lastFlush = performance.now(); }
+    }
+
+    const workerCount = pickWorkerCount(file.size);
+    let usedWorkers = false;
+    if (workerCount > 1) {
+      bytes = null;  // each worker reads its own copy; free this one
+      try {
+        failed = await runInWorkers(workerCount, { file, wasm, quality, settings }, batches, receive);
+        usedWorkers = true;
+      } catch (error) {
+        console.warn("Background workers unavailable, building on the page instead:", error);
+        viewer.clear();
+        done = 0;
+      }
+    }
+    if (!usedWorkers) {
+      failed = await runHere(ifc, bytes || new Uint8Array(await file.arrayBuffer()), quality, settings, batches, receive);
+    }
+
+    viewer.flush();
+    const seconds = Math.round((performance.now() - started) / 100) / 10;
+    viewer.finish(file.name, seconds, failed);
+    say("");
+    $("m-reload").hidden = false;
+    for (const id of ["m-colour", "m-show", "m-fit"]) $(id).disabled = false;
+    // Table rows can now jump to their object
+    renderValueTable();
+    renderObjects();
+  } catch (error) {
+    console.error(error);
+    const offline = /fetch|import|module|network/i.test(String(error));
+    say(offline ? "The 3D viewer couldn't be downloaded. It needs an internet connection (cdn.jsdelivr.net)." : error.message);
+    drop.hidden = !!viewer && viewer.count() > 0;
+  } finally {
+    loading = false;
+  }
+}
+
+const BATCH = 40;  // IFC objects per piece of work
+
+async function compileWasm() {
+  const url = IFCLITE + "ifc-lite_bg.wasm";
+  try {
+    return await WebAssembly.compileStreaming(fetch(url));
+  } catch (error) {
+    return WebAssembly.compile(await (await fetch(url)).arrayBuffer());
+  }
+}
+
+// One worker per spare CPU core, but each holds its own copy of the file, so fewer for big files
+function pickWorkerCount(fileSize) {
+  const cores = navigator.hardwareConcurrency || 4;
+  const byMemory = Math.floor(1.6e9 / Math.max(fileSize, 1));
+  return Math.max(1, Math.min(cores - 1, 6, byMemory));
+}
+
+function geometryBatch(api, bytes, jobs, s) {
+  return api.processGeometryBatch(bytes, jobs, s.unitScale, s.rtc[0], s.rtc[1], s.rtc[2], s.needsShift,
+    s.voidKeys, s.voidCounts, s.voidValues, s.styleIds, s.styleColors,
+    s.planeAngleToRadians, s.materialElementIds, s.materialColorCounts, s.materialColors);
+}
+
+// Positions come out in metres and Y-up, relative to each object's own origin
+function takeMeshes(collection) {
+  const meshes = [];
+  for (let i = 0; i < collection.length; i++) {
+    const mesh = collection.takeMesh(i);
+    if (!mesh) continue;
+    const origin = mesh.origin;
+    meshes.push({ id: mesh.expressId, type: mesh.ifcType, positions: mesh.positions, indexes: mesh.indices,
+      origin: [origin[0], origin[1], origin[2]] });
+    mesh.free();
+  }
+  collection.free();
+  return meshes;
+}
+
+// Fallback: everything on the page itself, one piece at a time
+async function runHere(ifc, bytes, quality, settings, batches, receive) {
+  const api = new ifc.IfcAPI();
+  if (quality) api.setTessellationQuality(quality);
+  let failed = 0;
+  try {
+    for (const jobs of batches) {
+      try {
+        receive(takeMeshes(geometryBatch(api, bytes, jobs, settings)), jobs.length / 3);
+      } catch (error) {
+        console.warn("Skipped objects that couldn't be read:", error);
+        failed += jobs.length / 3;
+        receive([], jobs.length / 3);
+      }
+      await new Promise((resolve) => setTimeout(resolve));
+    }
+  } finally {
+    api.free();
+  }
+  return failed;
+}
+
+// The worker gets the same helpers as the page, as text
+const WORKER_SOURCE = `
+let api, bytes, settings;
+${geometryBatch.toString()}
+${takeMeshes.toString()}
+self.onmessage = async (event) => {
+  const message = event.data;
+  try {
+    if (message.type === "init") {
+      const ifc = await import(message.url + "ifc-lite.js");
+      await ifc.default({ module_or_path: message.wasm });
+      api = new ifc.IfcAPI();
+      if (message.quality) api.setTessellationQuality(message.quality);
+      bytes = new Uint8Array(await message.file.arrayBuffer());
+      settings = message.settings;
+      self.postMessage({ type: "ready" });
+    } else {
+      let meshes = [], failed = false;
+      try {
+        meshes = takeMeshes(geometryBatch(api, bytes, message.jobs, settings));
+      } catch (error) {
+        failed = true;
+      }
+      const transfer = meshes.flatMap((m) => [m.positions.buffer, m.indexes.buffer]);
+      self.postMessage({ type: "meshes", meshes, failed }, transfer);
+    }
+  } catch (error) {
+    self.postMessage({ type: "error", message: String((error && error.message) || error) });
+  }
+};`;
+
+// Hands pieces of work to a few background workers, so several CPU cores triangulate at once
+function runInWorkers(count, init, batches, receive) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([WORKER_SOURCE], { type: "text/javascript" }));
+    const workers = [];
+    let next = 0, finished = 0, failed = 0, ready = 0, stopped = false;
+    const stop = () => { stopped = true; workers.forEach((w) => w.terminate()); URL.revokeObjectURL(url); };
+    const fail = (error) => { if (!stopped) { stop(); reject(error); } };
+    const timer = setTimeout(() => { if (!ready) fail(new Error("Workers did not start")); }, 30000);
+    function feed(worker) {
+      if (next < batches.length) {
+        worker.batch = batches[next++];
+        worker.postMessage({ type: "jobs", jobs: worker.batch });
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      const worker = new Worker(url, { type: "module" });
+      workers.push(worker);
+      worker.onerror = (event) => fail(new Error(event.message || "Worker failed"));
+      worker.onmessage = (event) => {
+        const message = event.data;
+        if (stopped) return;
+        if (message.type === "error") return fail(new Error(message.message));
+        if (message.type === "ready") { ready++; clearTimeout(timer); return feed(worker); }
+        const jobCount = worker.batch.length / 3;
+        if (message.failed) failed += jobCount;
+        receive(message.meshes, jobCount);
+        finished++;
+        if (finished === batches.length) { stop(); resolve(failed); } else feed(worker);
+      };
+      worker.postMessage({ type: "init", url: IFCLITE, wasm: init.wasm, file: init.file, quality: init.quality, settings: init.settings });
+    }
+    if (!batches.length) { stop(); resolve(0); }
+  });
+}
+
+// The objects are matched by their number in the IFC file (#123=…), so make sure this is the same model:
+// a few GlobalIds from the report must sit on those same numbers in the file
+function checkSameModel(bytes) {
+  const samples = DATA.objects.filter((o) => o.id && o.step).filter((_, i, list) => i % Math.max(1, Math.floor(list.length / 3)) === 0).slice(0, 3);
+  for (const o of samples) {
+    const at = findBytes(bytes, `'${o.id}'`);
+    if (at < 0 || stepNumberBefore(bytes, at) !== o.step) {
+      return `This IFC file doesn't match the validated model (${DATA.model}). Load the file the report was made from.`;
+    }
+  }
+  return null;
+}
+function findBytes(bytes, text) {
+  const pattern = new TextEncoder().encode(text);
+  for (let i = bytes.indexOf(pattern[1]); i !== -1; i = bytes.indexOf(pattern[1], i + 1)) {
+    if (bytes[i - 1] !== pattern[0]) continue;
+    let k = 2;
+    while (k < pattern.length && bytes[i - 1 + k] === pattern[k]) k++;
+    if (k === pattern.length) return i - 1;
+  }
+  return -1;
+}
+function stepNumberBefore(bytes, at) {
+  let i = at;
+  while (i > 0 && at - i < 200 && bytes[i] !== 0x3d) i--;  // back to "="
+  let digits = "";
+  for (i--; i >= 0 && bytes[i] === 0x20; i--);              // spaces before "="
+  for (; i >= 0 && bytes[i] >= 0x30 && bytes[i] <= 0x39; i--) digits = String.fromCharCode(bytes[i]) + digits;
+  return bytes[i] === 0x23 ? Number(digits) : -1;           // "#"
+}
+
+function createViewer(THREE, OrbitControls) {
+  const box = $("m-viewer"), panel = $("m-panel");
+
+  // ----- Statuses per object -----
+  // [requirement label -> {status, value}] per object, one row per label (worst wins)
+  const RANK = { 1: 0, 2: 1, 0: 2 };  // passed < missing < failed
+  const CODE = { 1: "pass", 0: "fail", 2: "missing" };
+  const byObject = DATA.objects.map(() => new Map());
+  for (const [obj, req, status, value] of DATA.checks) {
+    const label = reqs[req].label, known = byObject[obj].get(label);
+    if (!known || RANK[status] > RANK[known.status]) byObject[obj].set(label, { status, value: valueText(value) });
+  }
+  const worst = byObject.map((rows) => CODE[[...rows.values()].reduce((w, r) => RANK[r.status] > RANK[w] ? r.status : w, 1)]);
+
+  // ----- Scene -----
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x8a8a80, 2.2));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(0.6, 1, 0.4);
+  scene.add(sun);
+  const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  box.append(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 1000);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  let moved = false;
+  controls.addEventListener("start", () => { moved = true; });
+  controls.addEventListener("change", render);
+  function render() { renderer.render(scene, camera); }
+  function resize() {
+    const { clientWidth: w, clientHeight: h } = box;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    render();
+  }
+  new ResizeObserver(resize).observe(box);
+  resize();
+
+  // ----- Geometry, merged into a few big buffers -----
+  let chunks = [], meshes = [], pending = [], pendingVertices = 0, itemsOf = new Map();
+  // Everything is drawn relative to the first object's origin: float32 positions lose precision far from 0,0,0
+  let base = null;
+  function add(obj, positions, indexes, origin) {
+    if (!indexes.length) return;
+    if (!base) base = [origin[0], origin[1], origin[2]];
+    const dx = origin[0] - base[0], dy = origin[1] - base[1], dz = origin[2] - base[2];
+    for (let i = 0; i < positions.length; i += 3) {
+      positions[i] += dx; positions[i + 1] += dy; positions[i + 2] += dz;
+    }
+    pending.push({ obj, positions, indexes });
+    pendingVertices += positions.length / 3;
+  }
+  // Merges what has arrived into one buffer, so the model is drawn in a few big pieces
+  function flush() {
+    if (!pending.length) return;
+    const vertexCount = pendingVertices, indexCount = pending.reduce((n, p) => n + p.indexes.length, 0);
+    const positions = new Float32Array(vertexCount * 3), indexes = new Uint32Array(indexCount);
+    const chunk = { items: [], index: chunks.length };
+    let v = 0, n = 0;
+    for (const p of pending) {
+      const item = { obj: p.obj, chunk: chunk.index, vStart: v, vCount: p.positions.length / 3, iStart: n, iCount: p.indexes.length };
+      positions.set(p.positions, v * 3);
+      for (let i = 0; i < p.indexes.length; i++) indexes[n + i] = p.indexes[i] + v;
+      v += item.vCount; n += item.iCount;
+      chunk.items.push(item);
+      if (item.obj >= 0) {
+        if (!itemsOf.has(item.obj)) itemsOf.set(item.obj, []);
+        itemsOf.get(item.obj).push(item);
+      }
+    }
+    pending = []; pendingVertices = 0;
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute("color", new THREE.BufferAttribute(new Uint8Array(vertexCount * 3), 3, true));
+    geometry.setIndex(new THREE.BufferAttribute(indexes, 1));
+    geometry.computeBoundingSphere();
+    chunk.full = indexes.slice();  // to bring hidden objects back
+    chunk.geometry = geometry;
+    const mesh = new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true }));
+    mesh.userData.chunk = chunk;
+    chunks.push(chunk); meshes.push(mesh); scene.add(mesh);
+    paintChunk(chunk, palette());
+    if (!moved) fitAll(); else render();
+  }
+  function clear() {
+    for (const mesh of meshes) { scene.remove(mesh); mesh.geometry.dispose(); mesh.material.dispose(); }
+    chunks = []; meshes = []; pending = []; pendingVertices = 0; itemsOf = new Map(); base = null;
+    selected = -1; highlight = null; moved = false;
+    drawOverlay();
+    render();
+  }
+
+  // ----- Colours -----
+  let colourBy = "", onlyIssues = false, highlight = null, selected = -1;
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  function palette() {
+    const dark = css("color-scheme") === "dark";
+    const rgb = (hex) => { const c = new THREE.Color(hex); return [c.r * 255, c.g * 255, c.b * 255].map(Math.round); };
+    return {
+      pass: rgb("#0ca30c"), fail: rgb("#d03b3b"), missing: rgb("#fab219"),
+      none: rgb(dark ? "#4d4d48" : "#cfcec6"), selected: new THREE.Color(dark ? "#3987e5" : "#2a78d6"),
+    };
+  }
+  const statusOf = (obj) => {
+    if (obj < 0) return null;
+    if (!colourBy) return worst[obj];
+    const row = byObject[obj].get(colourBy);
+    return row ? CODE[row.status] : null;
+  };
+  function paintChunk(chunk, colours) {
+    const colour = chunk.geometry.attributes.color.array, index = chunk.geometry.index.array;
+    let drawn = 0;
+    for (const item of chunk.items) {
+      const status = statusOf(item.obj);
+      const dimmed = highlight && !highlight.has(item.obj);
+      const [r, g, b] = status && !dimmed ? colours[status] : colours.none;
+      for (let v = item.vStart; v < item.vStart + item.vCount; v++) {
+        colour[v * 3] = r; colour[v * 3 + 1] = g; colour[v * 3 + 2] = b;
+      }
+      // Hidden objects keep their place in the buffers but draw nothing
+      const hide = onlyIssues && (status === null || status === "pass" || dimmed);
+      drawn += !hide;
+      for (let i = item.iStart; i < item.iStart + item.iCount; i++) index[i] = hide ? item.vStart : chunk.full[i];
+    }
+    chunk.geometry.attributes.color.needsUpdate = true;
+    chunk.geometry.index.needsUpdate = true;
+    return drawn;
+  }
+  function paint() {
+    if (!chunks.length) return;
+    const colours = palette();
+    overlay.material.color = colours.selected;
+    const drawn = chunks.reduce((n, chunk) => n + paintChunk(chunk, colours), 0);
+    say(drawn ? "" : "No objects to show with these filters");
+    render();
+  }
+
+  // ----- Camera -----
+  function boxOf(list) {
+    const bounds = new THREE.Box3(), point = new THREE.Vector3();
+    for (const item of list) {
+      const positions = chunks[item.chunk].geometry.attributes.position.array;
+      for (let v = item.vStart; v < item.vStart + item.vCount; v++) bounds.expandByPoint(point.fromArray(positions, v * 3));
+    }
+    return bounds;
+  }
+  function frame(bounds) {
+    if (bounds.isEmpty()) return;
+    const sphere = bounds.getBoundingSphere(new THREE.Sphere());
+    const radius = Math.max(sphere.radius, 0.5);
+    // Fit the narrower of the two directions, so a tall phone screen doesn't cut the model off at the sides
+    const half = Math.atan(Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * Math.min(1, camera.aspect));
+    const distance = radius / Math.sin(half) * 0.8;
+    const direction = new THREE.Vector3(1, 0.8, 1.2).normalize();
+    controls.target.copy(sphere.center);
+    camera.position.copy(sphere.center).addScaledVector(direction, distance);
+    camera.near = distance / 1000;
+    camera.far = distance * 100;
+    camera.updateProjectionMatrix();
+    controls.update();
+    render();
+  }
+  function fitAll() {
+    const bounds = new THREE.Box3();
+    for (const mesh of meshes) bounds.expandByObject(mesh);
+    frame(bounds);
+  }
+
+  // The selected object is also drawn on top of everything, so walls and slabs can't hide it
+  const overlay = new THREE.Mesh(new THREE.BufferGeometry(),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0.85, depthTest: false }));
+  overlay.renderOrder = 1;
+  scene.add(overlay);
+  function drawOverlay() {
+    overlay.visible = selected >= 0 && itemsOf.has(selected);
+    if (!overlay.visible) return;
+    const positions = [], indexes = [];
+    for (const item of itemsOf.get(selected)) {
+      const chunk = chunks[item.chunk], from = chunk.geometry.attributes.position.array, first = positions.length / 3;
+      for (let v = item.vStart; v < item.vStart + item.vCount; v++) positions.push(from[v * 3], from[v * 3 + 1], from[v * 3 + 2]);
+      for (let i = item.iStart; i < item.iStart + item.iCount; i++) indexes.push(chunk.full[i] - item.vStart + first);
+    }
+    overlay.geometry.dispose();
+    overlay.geometry = new THREE.BufferGeometry();
+    overlay.geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    overlay.geometry.setIndex(indexes);
+  }
+
+  // ----- Picking -----
+  const raycaster = new THREE.Raycaster();
+  let down = null;
+  renderer.domElement.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+    const rect = renderer.domElement.getBoundingClientRect();
+    raycaster.setFromCamera(new THREE.Vector2(
+      ((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1), camera);
+    const hit = raycaster.intersectObjects(meshes)[0];
+    if (!hit) return select(-1);
+    const chunk = hit.object.userData.chunk, at = hit.faceIndex * 3;
+    const item = chunk.items.find((it) => at >= it.iStart && at < it.iStart + it.iCount);
+    select(item ? item.obj : -1);
+  });
+
+  // ----- Side panel -----
+  function select(obj) {
+    selected = obj;
+    drawOverlay();
+    paint();
+    panel.replaceChildren();
+    if (obj < 0) {
+      panel.append(el("p", { class: "muted", text: "Click an object in the model, or a row in the Values or Objects table, to see its checks." }));
+      return;
+    }
+    const o = DATA.objects[obj];
+    panel.append(el("div", { class: "panel-head" },
+      el("div", { class: "sub", text: o.cls }),
+      el("h3", { text: o.name || "Unnamed" }),
+      el("div", { class: "mono", text: o.id })));
+    const rows = [...byObject[obj].entries()].sort((a, b) => RANK[b[1].status] - RANK[a[1].status] || a[0].localeCompare(b[0]));
+    const list = el("div", { class: "panel-checks" });
+    for (const [label, row] of rows) {
+      const s = STATUS[CODE[row.status]];
+      list.append(el("div", { class: "panel-check" + (label === colourBy ? " current" : "") },
+        el("span", { class: "status" }, el("span", { class: "icon", title: s.label, style: `background:${s.color};color:${s.ink}`, text: s.icon })),
+        el("div", {}, el("div", { text: label }),
+          row.value === null ? el("div", { class: "missing", text: "Missing" }) : el("div", { class: "mono", text: row.value }))));
+    }
+    panel.append(list);
+  }
+
+  // ----- Controls -----
+  const colourSelect = $("m-colour");
+  colourSelect.addEventListener("change", () => { colourBy = colourSelect.value; highlight = null; select(selected); });
+  $("m-show").addEventListener("change", () => { onlyIssues = $("m-show").value === "issues"; paint(); });
+  $("m-fit").addEventListener("click", fitAll);
+  // Repaint when the light/dark theme changes
+  new MutationObserver(paint).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", paint);
+
+  function finish(fileName, seconds, failed) {
+    if (!moved) fitAll();
+    select(-1);
+    $("m-note").textContent = `${fmt(itemsOf.size)} of ${fmt(DATA.objects.length)} checked objects drawn from ${fileName} in ${seconds} s. ` +
+      "The project, site, building, storeys, spaces and openings are not drawn." +
+      (failed ? ` ${fmt(failed)} objects couldn't be read by the viewer.` : "");
+  }
+
+  // Called by the Values section and the tables
+  window.simbaModel = {
+    follow(label, value) {
+      colourBy = label;
+      colourSelect.value = label;
+      highlight = value === undefined ? null
+        : new Set([...(checksByLabel.get(label) || new Map()).entries()].filter(([, row]) => row.value === value).map(([obj]) => obj));
+      select(selected);
+    },
+    has: (obj) => itemsOf.has(obj),
+    focus(obj) {
+      if (!itemsOf.has(obj)) return;
+      moved = true;
+      select(obj);
+      frame(boxOf(itemsOf.get(obj)).expandByScalar(3));
+      $("model-card").scrollIntoView({ behavior: "smooth", block: "start" });
+    },
+  };
+
+  return { add, flush, clear, finish, count: () => meshes.length };
+}
+
+// Colour-by options can be filled in before a model is loaded
+$("m-colour").append(el("option", { value: "", text: "Worst result, all requirements" }),
+  ...labels.map((label) => el("option", { value: label, text: label })));
 </script>
 </body>
 </html>

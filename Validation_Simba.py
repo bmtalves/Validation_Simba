@@ -553,6 +553,8 @@ def dashboard_data(results, model, model_path, phase):
 
         obj = objects.setdefault(element.id(), {
             "id": getattr(element, "GlobalId", ""),
+            # The number in the IFC file (#123=...), which the 3D viewer uses to find the object
+            "step": element.id(),
             "cls": element.is_a(),
             "name": getattr(element, "Name", None) or "",
             "index": len(objects),

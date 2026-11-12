@@ -94,11 +94,19 @@ The CSV's `Validation` column shows `PASSED`, `FAILED` or `MISSING`. The dashboa
 
 ## The dashboard
 
-`validation <model> <phase>.html` is a single file that works offline and can be shared as it is. It shows:
+`validation <model> <phase>.html` is a single file that can be shared as it is. Everything except the 3D model works offline. It shows:
 
 - **Checks passed:** the overall pass rate, with a donut chart and legend showing how many checks passed, failed and are missing. Hover a slice for its count and share.
 - **Summary tiles:** failing requirements, objects with issues, object groups with failures, and property sets with failures.
 - **By object group** and **By property set:** the share of checks passed, worst first. Hover a bar for details.
+- **3D model:** drop the IFC file onto the card, or click *Choose IFC file*, to see the model coloured by result: green if all its checks pass, red if any fail, yellow if any are missing, grey for objects with no requirement. Drag to rotate, right-drag to pan and scroll to zoom.
+  - The file is read and triangulated **in your browser** by [IFClite](https://github.com/louistrue/ifc-lite) (Rust/WebAssembly, MPL-2.0) and drawn with [three.js](https://threejs.org). It is never uploaded. Only the two libraries are downloaded, from cdn.jsdelivr.net, so this part needs an internet connection.
+  - Use the same IFC file the report was made from (the updated file from `Save as new file?` works too). Objects are matched by their number in the file (`#123=`), and the dashboard checks a few GlobalIds to make sure it is the right model.
+  - Click an object, or a row in the Values or Objects table, to see all its checks and values. The selected object is drawn in blue on top of everything, so walls and slabs can't hide it.
+  - *Colour by* switches from the worst result to a single requirement. Picking a requirement or a value in the Values section does the same, and greys out objects with other values.
+  - *Only not passing* hides everything that passes.
+  - The project, site, building, storeys, spaces and openings are not drawn.
+  - The model is built by several background workers at once (one per spare CPU core, fewer for very big files to save memory) and appears while it loads. Files over 100 MB use a lower detail level for curved shapes such as pipes and railings. A 300 MB model takes about 25 seconds. The dashboard itself stays small, since it holds no geometry.
 - **Requirements:** a table with the failed and missing count per requirement, which you can filter by status and group, search, and sort. A requirement shows as *Missing* when all its problems are missing values, and *Failing* when at least one value is wrong.
 - **Values:** pick a requirement (it opens on `NONS_Process.ProcessStatus`) to see every value in the model, how many objects have it, and whether it passes. Objects with no value are grouped as *Missing*, and values of the wrong type show the type, e.g. `yes (IfcLabel)`. The list can be filtered by Passing, Failing or Missing. Click a value to list only its objects. The list shows each object's status, value, class, name, GlobalId and group, and can be filtered, searched and sorted.
 - **Objects:** each object's class, name, GlobalId and failing requirements. It shows the objects with the most issues first; switch to *All objects* to list every object checked. You can filter by class and search by name or GlobalId.
@@ -166,4 +174,5 @@ The tests build small IFC4 models in memory and cover:
 
 - **Allowed values have to be added by hand:** Statsbygg's mvdXML files contain no value lists, so text properties are only checked against the lists you put in `allowed_values.csv`.
 - **Old date not copied:** `NOSSB_Process.DesignedStatusDate` has no equivalent in SIMBA 2.1.
+- **3D model:** whoever opens the dashboard also needs the IFC file, and an internet connection for the viewer libraries. Large models need a computer with plenty of memory (each worker reads its own copy of the file, so a 300 MB model can use 1.5 GB or more while loading).
 - **Rule syntax:** only the mvdXML rule syntax used in the Statsbygg files is supported, not the full mvdXML standard.

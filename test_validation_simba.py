@@ -106,6 +106,7 @@ def test_dashboard_data():
     assert data["model"] == "model.ifc"
     assert data["requirements"] == [{"group": "200 Wall", "label": "Pset_WallCommon.IsExternal", "index": 0,
                                      "pset": "Pset_WallCommon", "type": "IFCBOOLEAN", "passed": 1, "failed": 0, "missing": 1}]
+    assert {o["step"] for o in data["objects"]} == {typed_wall.id(), lone_wall.id()}
     failed = {o["name"]: o["failed"] for o in data["objects"]}
     assert failed == {"AVA.001": [], "AVA.002": ["Pset_WallCommon.IsExternal"]}
     # [object, requirement, status (1 passed, 0 failed, 2 missing), value index (-1 = missing)]
@@ -201,3 +202,4 @@ def test_get_arguments():
     for argv in (["project.py"], ["project.py", "model.txt"], ["project.py", "model.ifc", "rules.xml"], ["project.py", "a.ifc", "b", "c"]):
         with pytest.raises(SystemExit):
             get_arguments(argv)
+
