@@ -94,8 +94,15 @@
   .tile .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
   .tile .note { color: var(--text-muted); font-size: 12px; margin-top: 2px; }
   .hero .value { font-size: 56px; font-weight: 600; line-height: 1.05; margin: 8px 0 4px; letter-spacing: -0.02em; }
-  .seg { display: flex; gap: 2px; height: 8px; margin-top: 14px; }
-  .seg span { border-radius: 999px; min-width: 0; }
+  .hero-body { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .donut { flex: none; width: 128px; height: 128px; }
+  .donut circle.part { fill: none; stroke-width: 18; cursor: default; transition: stroke-width 0.1s; }
+  .donut circle.part:hover { stroke-width: 22; }
+  .donut-legend { display: grid; gap: 6px; margin-top: 16px; font-size: 13px; }
+  .donut-legend div { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 8px; align-items: center; }
+  .donut-legend i { width: 10px; height: 10px; border-radius: 3px; }
+  .donut-legend .num { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  .donut-legend .share { text-align: right; font-variant-numeric: tabular-nums; color: var(--text-muted); min-width: 48px; }
 
   .grid-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px; }
   .legend { display: flex; gap: 16px; font-size: 12px; color: var(--text-secondary); margin: 8px 0 14px; }
@@ -198,13 +205,13 @@
     <div class="card">
       <h2>By object group</h2>
       <p class="sub">Share of checks passed per Statsbygg group, worst first</p>
-      <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span></div>
+      <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span><span><i style="background:var(--warning)"></i>Missing</span></div>
       <div class="bars" id="by-group"></div>
     </div>
     <div class="card">
       <h2>By property set</h2>
-      <p class="sub">Where the missing information lives, worst first</p>
-      <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span></div>
+      <p class="sub">Where the failing and missing information lives, worst first</p>
+      <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span><span><i style="background:var(--warning)"></i>Missing</span></div>
       <div class="bars" id="by-pset"></div>
     </div>
   </div>
@@ -217,7 +224,7 @@
       </div>
       <div class="filters">
         <select id="f-status" aria-label="Status">
-          <option value="fail">Failing</option>
+          <option value="fail">Not passing</option>
           <option value="pass">Passing</option>
           <option value="all">All statuses</option>
         </select>
@@ -239,7 +246,7 @@
         <select id="v-req" aria-label="Requirement"></select>
       </div>
     </div>
-    <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span></div>
+    <div class="legend"><span><i style="background:var(--good)"></i>Passed</span><span><i style="background:var(--critical)"></i>Failed</span><span><i style="background:var(--warning)"></i>Missing</span></div>
     <div class="bars" id="v-dist"></div>
     <div class="values-head">
       <div id="v-filter-label"></div>
@@ -247,6 +254,7 @@
         <select id="v-status" aria-label="Status">
           <option value="all">All statuses</option>
           <option value="fail">Failing</option>
+          <option value="missing">Missing</option>
           <option value="pass">Passing</option>
         </select>
         <input id="v-search" type="search" placeholder="Search name, GlobalId or value" aria-label="Search objects and values">
@@ -325,9 +333,33 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 
 // ---------- Derived numbers ----------
 const reqs = DATA.requirements;
-const checks = reqs.reduce((a, r) => a + r.passed + r.failed, 0);
-const passedChecks = reqs.reduce((a, r) => a + r.passed, 0);
-const failingReqs = reqs.filter((r) => r.failed > 0);
+// Three statuses: passed, failed (a value that isn't valid) and missing (no value at all)
+const STATUS = {
+  pass: { label: "Passing", color: "var(--good)", icon: "✓", ink: "#fff" },
+  fail: { label: "Failing", color: "var(--critical)", icon: "✕", ink: "#fff" },
+  missing: { label: "Missing", color: "var(--warning)", icon: "?", ink: "#0b0b0b" },
+};
+const notPassing = (r) => r.failed + r.missing;
+const totalOf = (r) => r.passed + r.failed + r.missing;
+const countStatus = (r) => notPassing(r) === 0 ? "pass" : r.failed === 0 ? "missing" : "fail";
+function segments(r) {
+  return [
+    r.passed ? el("span", { style: `flex:${r.passed};background:var(--good)` }) : null,
+    r.failed ? el("span", { style: `flex:${r.failed};background:var(--critical)` }) : null,
+    r.missing ? el("span", { style: `flex:${r.missing};background:var(--warning)` }) : null,
+  ];
+}
+function statusCell(status) {
+  const s = STATUS[status];
+  return el("span", { class: "status" },
+    el("span", { class: "icon", style: `background:${s.color};color:${s.ink}`, "aria-hidden": "true", text: s.icon }),
+    s.label);
+}
+const totals = reqs.reduce((a, r) => ({ passed: a.passed + r.passed, failed: a.failed + r.failed, missing: a.missing + r.missing }),
+  { passed: 0, failed: 0, missing: 0 });
+const checks = totalOf(totals);
+const passedChecks = totals.passed;
+const failingReqs = reqs.filter((r) => notPassing(r) > 0);
 const groupNames = new Set(reqs.map((r) => r.group));
 const failingGroups = new Set(failingReqs.map((r) => r.group));
 const psetNames = new Set(reqs.filter((r) => r.pset).map((r) => r.pset));
@@ -347,13 +379,57 @@ meta.append(el("span", { text: DATA.generated }));
 // ---------- Hero + tiles ----------
 const rate = pct(passedChecks, checks);
 const hero = $("hero");
+const heroParts = [
+  { label: "Passed", count: totals.passed, color: "var(--good)" },
+  { label: "Failed", count: totals.failed, color: "var(--critical)" },
+  { label: "Missing", count: totals.missing, color: "var(--warning)" },
+];
+
+function donut(parts) {
+  const NS = "http://www.w3.org/2000/svg";
+  const r = 50, size = 128, circumference = 2 * Math.PI * r;
+  const total = parts.reduce((a, p) => a + p.count, 0);
+  const shown = parts.filter((p) => p.count > 0);
+  const gap = shown.length > 1 ? 2 : 0;  // 2px of surface between slices
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${size} ${size}`);
+  svg.setAttribute("class", "donut");
+  svg.setAttribute("role", "img");
+  svg.setAttribute("aria-label", parts.map((p) => `${p.label} ${p.count}`).join(", "));
+  let offset = 0;
+  for (const part of shown) {
+    const length = (part.count / total) * circumference;
+    const circle = document.createElementNS(NS, "circle");
+    circle.setAttribute("class", "part");
+    circle.setAttribute("cx", size / 2);
+    circle.setAttribute("cy", size / 2);
+    circle.setAttribute("r", r);
+    circle.setAttribute("stroke", part.color);
+    circle.setAttribute("stroke-dasharray", `${Math.max(length - gap, 0.5)} ${circumference}`);
+    // Start at 12 o'clock and go clockwise
+    circle.setAttribute("stroke-dashoffset", -offset);
+    circle.setAttribute("transform", `rotate(-90 ${size / 2} ${size / 2})`);
+    const tip = `<b>${part.label}</b><br>${fmt(part.count)} of ${fmt(total)} checks (${pct(part.count, total)}%)`;
+    circle.addEventListener("mousemove", (e) => showTip(e, tip));
+    circle.addEventListener("mouseleave", hideTip);
+    svg.append(circle);
+    offset += length;
+  }
+  return svg;
+}
+
 hero.append(el("div", { class: "label sub", text: "Checks passed" }));
-hero.append(el("div", { class: "value", text: `${rate}%` }));
-const heroNote = el("div", { class: "sub" }, `${fmt(passedChecks)} of ${fmt(checks)} checks`);
-hero.append(heroNote);
-hero.append(el("div", { class: "seg", "aria-hidden": "true" },
-  el("span", { style: `flex:${passedChecks};background:var(--good)` }),
-  el("span", { style: `flex:${checks - passedChecks};background:var(--critical)` })));
+hero.append(el("div", { class: "hero-body" },
+  el("div", {},
+    el("div", { class: "value", text: `${rate}%` }),
+    el("div", { class: "sub", text: `${fmt(passedChecks)} of ${fmt(checks)} checks` })),
+  donut(heroParts)));
+hero.append(el("div", { class: "donut-legend" }, ...heroParts.map((p) =>
+  el("div", {},
+    el("i", { style: `background:${p.color}` }),
+    el("span", { text: p.label }),
+    el("span", { class: "num", text: fmt(p.count) }),
+    el("span", { class: "share", text: `${pct(p.count, checks)}%` })))));
 
 const tiles = [
   ["Requirements failing", fmt(failingReqs.length), `of ${fmt(reqs.length)} that apply`],
@@ -371,12 +447,13 @@ function aggregate(keyFn) {
   const map = new Map();
   for (const r of reqs) {
     const key = keyFn(r);
-    const entry = map.get(key) || { name: key, passed: 0, failed: 0, reqs: 0, failingReqs: 0 };
-    entry.passed += r.passed; entry.failed += r.failed; entry.reqs += 1; entry.failingReqs += r.failed > 0;
+    const entry = map.get(key) || { name: key, passed: 0, failed: 0, missing: 0, reqs: 0, failingReqs: 0 };
+    entry.passed += r.passed; entry.failed += r.failed; entry.missing += r.missing;
+    entry.reqs += 1; entry.failingReqs += notPassing(r) > 0;
     map.set(key, entry);
   }
   return [...map.values()].sort((a, b) =>
-    (b.failed / (b.passed + b.failed)) - (a.failed / (a.passed + a.failed)) || b.failed - a.failed);
+    (notPassing(b) / totalOf(b)) - (notPassing(a) / totalOf(a)) || notPassing(b) - notPassing(a));
 }
 
 function renderBars(container, rows, limit = 10) {
@@ -385,16 +462,14 @@ function renderBars(container, rows, limit = 10) {
     container.replaceChildren();
     const shown = expanded ? rows : rows.slice(0, limit);
     for (const row of shown) {
-      const total = row.passed + row.failed;
+      const total = totalOf(row);
       const node = el("div", { class: "bar-row", tabindex: "0",
-          "aria-label": `${row.name}: ${row.failed} of ${total} checks failed` },
+          "aria-label": `${row.name}: ${row.passed} passed, ${row.failed} failed, ${row.missing} missing of ${total} checks` },
         el("div", { class: "name", text: row.name }),
-        el("div", { class: "track" },
-          row.passed ? el("span", { style: `flex:${row.passed};background:var(--good)` }) : null,
-          row.failed ? el("span", { style: `flex:${row.failed};background:var(--critical)` }) : null),
+        el("div", { class: "track" }, ...segments(row)),
         el("div", { class: "num", text: `${pct(row.passed, total)}%` }));
-      const tip = `<b>${esc(row.name)}</b><br>${fmt(row.passed)} passed · ${fmt(row.failed)} failed<br>` +
-        `${row.failingReqs} of ${row.reqs} requirements failing`;
+      const tip = `<b>${esc(row.name)}</b><br>${fmt(row.passed)} passed · ${fmt(row.failed)} failed · ${fmt(row.missing)} missing<br>` +
+        `${row.failingReqs} of ${row.reqs} requirements not passing`;
       node.addEventListener("mousemove", (e) => showTip(e, tip));
       node.addEventListener("mouseleave", hideTip);
       node.addEventListener("focus", () => { const r = node.getBoundingClientRect(); showTip({ clientX: r.right - 80, clientY: r.bottom }, tip); });
@@ -419,21 +494,17 @@ const groups = [...new Set(reqs.map((r) => r.group))].sort();
 $("f-group").append(el("option", { value: "", text: "All groups" }), ...groups.map((g) => el("option", { value: g, text: g })));
 if (!failingReqs.length) $("f-status").value = "all";
 
+const STATUS_ORDER = { pass: 0, missing: 1, fail: 2 };
 const reqColumns = [
-  { key: "status", label: "Status", sort: (r) => r.failed > 0 ? 1 : 0 },
+  { key: "status", label: "Status", sort: (r) => STATUS_ORDER[countStatus(r)] },
   { key: "group", label: "Group", sort: (r) => r.group },
   { key: "label", label: "Requirement", sort: (r) => r.label },
   { key: "type", label: "Value type", sort: (r) => r.type || "" },
   { key: "failed", label: "Failed", num: true, sort: (r) => r.failed },
-  { key: "total", label: "Objects", num: true, sort: (r) => r.passed + r.failed },
+  { key: "missing", label: "Missing", num: true, sort: (r) => r.missing },
+  { key: "total", label: "Objects", num: true, sort: (r) => totalOf(r) },
 ];
-let reqSort = { key: "failed", dir: -1 };
-
-function statusCell(failed) {
-  return el("span", { class: "status" },
-    el("span", { class: "icon", style: `background:${failed ? "var(--critical)" : "var(--good)"}`, "aria-hidden": "true", text: failed ? "✕" : "✓" }),
-    failed ? "Failing" : "Passing");
-}
+let reqSort = { key: "total", dir: -1 };
 
 function headerRow(columns, state, onSort) {
   return el("tr", {}, ...columns.map((c) => {
@@ -458,29 +529,27 @@ function renderRequirements() {
   const status = $("f-status").value, group = $("f-group").value;
   const query = $("f-search").value.trim().toLowerCase();
   let rows = reqs.filter((r) =>
-    (status === "all" || (status === "fail") === (r.failed > 0)) &&
+    (status === "all" || (status === "fail") === (notPassing(r) > 0)) &&
     (!group || r.group === group) &&
     (!query || r.label.toLowerCase().includes(query)));
   rows = sortRows(rows, reqColumns, reqSort);
 
   const table = $("req-table");
   table.replaceChildren(el("thead", {}, headerRow(reqColumns, reqSort, (key) => {
-    reqSort = { key, dir: reqSort.key === key ? -reqSort.dir : (key === "failed" || key === "total" ? -1 : 1) };
+    reqSort = { key, dir: reqSort.key === key ? -reqSort.dir : (["failed", "missing", "total"].includes(key) ? -1 : 1) };
     renderRequirements();
   })));
   const body = el("tbody");
   for (const r of rows) {
-    const total = r.passed + r.failed;
     body.append(el("tr", {},
-      el("td", {}, statusCell(r.failed > 0)),
+      el("td", {}, statusCell(countStatus(r))),
       el("td", { text: r.group }),
       el("td", {}, r.label),
       el("td", { class: "mono", text: r.type || "—" }),
-      el("td", { class: "num" }, fmt(r.failed),
-        el("div", { class: "meter", style: "margin-left:auto", "aria-hidden": "true" },
-          r.passed ? el("span", { style: `flex:${r.passed};background:var(--good)` }) : null,
-          r.failed ? el("span", { style: `flex:${r.failed};background:var(--critical)` }) : null)),
-      el("td", { class: "num", text: fmt(total) })));
+      el("td", { class: "num", text: fmt(r.failed) }),
+      el("td", { class: "num", text: fmt(r.missing) }),
+      el("td", { class: "num" }, fmt(totalOf(r)),
+        el("div", { class: "meter", style: "margin-left:auto", "aria-hidden": "true" }, ...segments(r)))));
   }
   if (!rows.length) body.append(el("tr", {}, el("td", { class: "empty", colspan: reqColumns.length, text: "No requirements match these filters" })));
   table.append(body);
@@ -494,26 +563,26 @@ renderRequirements();
 const valueText = (index) => index < 0 ? null : DATA.values[index];
 const labels = [...new Set(reqs.map((r) => r.label))].sort((a, b) => a.localeCompare(b));
 const checksByLabel = new Map();
-for (const [obj, req, passed, value] of DATA.checks) {
+for (const [obj, req, status, value] of DATA.checks) {
   const label = reqs[req].label;
   if (!checksByLabel.has(label)) checksByLabel.set(label, new Map());
   // One row per object, even if it is checked under two groups (e.g. Covering and Covering Ceiling)
   const rows = checksByLabel.get(label);
   const row = rows.get(obj) || { obj: DATA.objects[obj], groups: [], value: valueText(value), passed: true };
   row.groups.push(reqs[req].group);
-  row.passed = row.passed && passed === 1;
+  row.passed = row.passed && status === 1;
   rows.set(obj, row);
 }
 $("v-req").append(...labels.map((label) =>
   el("option", { value: label, text: `${label} (${checksByLabel.get(label).size})` })));
 const preferred = labels.includes("NONS_Process.ProcessStatus") ? "NONS_Process.ProcessStatus"
-  : ([...reqs].filter((r) => r.pset).sort((a, b) => b.failed - a.failed)[0] || reqs[0] || {}).label;
+  : ([...reqs].filter((r) => r.pset).sort((a, b) => notPassing(b) - notPassing(a))[0] || reqs[0] || {}).label;
 if (preferred) $("v-req").value = preferred;
 
 let valueFilter = undefined;  // undefined = all values, null = missing, string = that value
 let valueSort = { key: "value", dir: 1 };
 const valueColumns = [
-  { key: "status", label: "Status", sort: (r) => r.passed ? 0 : 1 },
+  { key: "status", label: "Status", sort: (r) => STATUS_ORDER[rowStatus(r)] },
   { key: "value", label: "Value", sort: (r) => r.value === null ? "\uffff" : r.value },
   { key: "cls", label: "IFC class", sort: (r) => r.obj.cls },
   { key: "name", label: "Name", sort: (r) => r.obj.name },
@@ -521,6 +590,8 @@ const valueColumns = [
   { key: "group", label: "Group", sort: (r) => r.groups.join() },
 ];
 const VALUE_LIMIT = 500;
+
+const rowStatus = (r) => r.passed ? "pass" : r.value === null ? "missing" : "fail";
 
 function valueRows() { return [...(checksByLabel.get($("v-req").value) || new Map()).values()]; }
 
@@ -535,28 +606,26 @@ let distributionExpanded = false;
 function renderValueDistribution() {
   const counts = new Map();
   for (const row of valueRows()) {
-    const entry = counts.get(row.value) || { value: row.value, passed: 0, failed: 0 };
-    entry[row.passed ? "passed" : "failed"] += 1;
+    const entry = counts.get(row.value) || { value: row.value, passed: 0, failed: 0, missing: 0 };
+    entry[{ pass: "passed", fail: "failed", missing: "missing" }[rowStatus(row)]] += 1;
     counts.set(row.value, entry);
   }
   const rows = [...counts.values()].sort((a, b) =>
-    (b.passed + b.failed) - (a.passed + a.failed) || String(a.value).localeCompare(String(b.value)));
-  const max = Math.max(1, ...rows.map((r) => r.passed + r.failed));
+    totalOf(b) - totalOf(a) || String(a.value).localeCompare(String(b.value)));
+  const max = Math.max(1, ...rows.map(totalOf));
   const container = $("v-dist");
   container.replaceChildren();
   for (const row of distributionExpanded ? rows : rows.slice(0, 12)) {
-    const total = row.passed + row.failed;
+    const total = totalOf(row);
     const shown = row.value === null ? "Missing" : row.value;
     const selected = valueFilter === row.value;
     const node = el("div", { class: "bar-row pickable" + (selected ? " selected" : ""), tabindex: "0", role: "button",
         "aria-pressed": String(selected), "aria-label": `${shown}: ${total} objects` },
       el("div", { class: "name" + (row.value === null ? " missing" : ""), text: shown }),
-      el("div", { class: "track", style: `width:${(total / max) * 100}%` },
-        row.passed ? el("span", { style: `flex:${row.passed};background:var(--good)` }) : null,
-        row.failed ? el("span", { style: `flex:${row.failed};background:var(--critical)` }) : null),
+      el("div", { class: "track", style: `width:${(total / max) * 100}%` }, ...segments(row)),
       el("div", { class: "num", text: fmt(total) }));
     const tip = `<b>${esc(shown)}</b><br>${fmt(total)} objects<br>` +
-      `${fmt(row.passed)} passed · ${fmt(row.failed)} failed<br>Click to list them`;
+      (row.value === null ? "No value" : `${fmt(row.passed)} passed · ${fmt(row.failed)} failed`) + "<br>Click to list them";
     node.addEventListener("click", () => pickValue(row.value));
     node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickValue(row.value); } });
     node.addEventListener("mousemove", (e) => showTip(e, tip));
@@ -576,7 +645,7 @@ function renderValueTable() {
   const status = $("v-status").value, query = $("v-search").value.trim().toLowerCase();
   let rows = valueRows().filter((r) =>
     (valueFilter === undefined || r.value === valueFilter) &&
-    (status === "all" || (status === "fail") === !r.passed) &&
+    (status === "all" || status === rowStatus(r)) &&
     (!query || [r.obj.name, r.obj.id, r.value].some((t) => (t || "").toLowerCase().includes(query))));
   rows = sortRows(rows, valueColumns, valueSort);
 
@@ -596,7 +665,7 @@ function renderValueTable() {
   const body = el("tbody");
   for (const r of rows.slice(0, VALUE_LIMIT)) {
     body.append(el("tr", {},
-      el("td", {}, statusCell(!r.passed)),
+      el("td", {}, statusCell(rowStatus(r))),
       r.value === null ? el("td", { class: "missing", text: "Missing" }) : el("td", { text: r.value }),
       el("td", { text: r.obj.cls }),
       el("td", { text: r.obj.name || "—" }),

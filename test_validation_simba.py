@@ -1,3 +1,5 @@
+import csv
+
 import pytest
 import ifcopenshell
 import ifcopenshell.api
@@ -103,13 +105,13 @@ def test_dashboard_data():
     data = dashboard_data(results, model, "folder/model.ifc", "B5.1.1 Handover")
     assert data["model"] == "model.ifc"
     assert data["requirements"] == [{"group": "200 Wall", "label": "Pset_WallCommon.IsExternal", "index": 0,
-                                     "pset": "Pset_WallCommon", "type": "IFCBOOLEAN", "passed": 1, "failed": 1}]
+                                     "pset": "Pset_WallCommon", "type": "IFCBOOLEAN", "passed": 1, "failed": 0, "missing": 1}]
     failed = {o["name"]: o["failed"] for o in data["objects"]}
     assert failed == {"AVA.001": [], "AVA.002": ["Pset_WallCommon.IsExternal"]}
-    # [object, requirement, passed, value index (-1 = missing)]
+    # [object, requirement, status (1 passed, 0 failed, 2 missing), value index (-1 = missing)]
     assert data["values"] == ["TRUE"]
     checks = {data["objects"][obj]["name"]: (passed, value) for obj, req, passed, value in data["checks"]}
-    assert checks == {"AVA.001": (1, 0), "AVA.002": (0, -1)}
+    assert checks == {"AVA.001": (1, 0), "AVA.002": (2, -1)}
 
 
 def test_values_recorded():
@@ -126,6 +128,23 @@ def test_values_recorded():
     assert checker.value_of(tile_width, lone_wall) == "600"
     assert checker.value_of(predefined, typed_wall) == "SOLIDWALL"
     assert checker.value_of(predefined, lone_wall) is None
+
+
+
+def test_status_missing_or_failed(tmp_path):
+    model, typed_wall, lone_wall = make_model()
+    other_wall = ifcopenshell.api.run("root.create_entity", model, ifc_class="IfcWall", name="AVA.003")
+    write_property(model, other_wall, "Pset_WallCommon", "IsExternal", "IFCLABEL", "yes")
+    concept = Concept("200 Wall", "IfcWall", "Pset_WallCommon.IsExternal", IS_EXTERNAL, None, find_required(IS_EXTERNAL))
+    results = validate(model, [concept])
+    statuses = {r.element.Name: r.status for r in results}
+    # Inherited TRUE passes, no value is missing, a value of the wrong type fails
+    assert statuses == {"AVA.001": "passed", "AVA.002": "missing", "AVA.003": "failed"}
+
+    path = tmp_path / "report.csv"
+    Validation_Simba.export_csv(results, path)
+    rows = {row["Name"]: (row["Value"], row["Validation"]) for row in csv.DictReader(open(path, encoding="utf-8-sig"))}
+    assert rows == {"AVA.001": ("TRUE", "PASSED"), "AVA.002": ("", "MISSING"), "AVA.003": ("yes (IfcLabel)", "FAILED")}
 
 
 def test_load_allowed_values(tmp_path):

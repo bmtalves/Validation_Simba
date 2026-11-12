@@ -55,8 +55,8 @@ python Validation_Simba.py model.ifc rules.mvdxml
 | Step | Prompt | Notes |
 |---|---|---|
 | Old status values | `Copy DesignedStatus into ProcessStatus?` | Shown only if the model has `NOSSB_Process.DesignedStatus`. Objects that already have a ProcessStatus are skipped, and the old values are kept. |
-| Summary | – | One `OK` / `FAIL` line per requirement with the number of failing objects. |
-| Report | `Export a report? (csv/html dashboard/both/no)` | Files are named `validation <model> <phase>.csv` / `.html`. The CSV has one row per object and requirement, with the value found and PASSED/FAILED. |
+| Summary | – | One `OK` / `FAIL` line per requirement with the number of failed and missing objects. |
+| Report | `Export a report? (csv/html dashboard/both/no)` | Files are named `validation <model> <phase>.csv` / `.html`. The CSV has one row per object and requirement, with the value found and its status. |
 | Save | `Save as new file?` | Only shown if status values were copied. Default name is `<model>_updated.ifc`. |
 
 You can answer prompts with the first letter (`y`, `n`, `c`, `h`, `b`).
@@ -80,15 +80,27 @@ NONS_Thermal.ThermalTransmittanceReq,"re:\d+([.,]\d+)?",U-value as a number
 
 Measures are also checked against IFC's own limits: `IFCPOSITIVELENGTHMEASURE` must be above 0 and `IFCNORMALISEDRATIOMEASURE` between 0 and 1.
 
+## Statuses
+
+Every check gets one of three statuses:
+
+| Status | Meaning |
+|---|---|
+| **Passed** | The value is there and valid. |
+| **Failed** | There is a value, but it is wrong: the wrong value type (e.g. text instead of a boolean), not in `allowed_values.csv`, or outside IFC's limits. |
+| **Missing** | There is no value at all: the property, attribute, type or georeferencing is not in the model. |
+
+The CSV's `Validation` column shows `PASSED`, `FAILED` or `MISSING`. The dashboard shows them in green, red and yellow, each with its own icon.
+
 ## The dashboard
 
 `validation <model> <phase>.html` is a single file that works offline and can be shared as it is. It shows:
 
-- **Checks passed:** the overall pass rate.
+- **Checks passed:** the overall pass rate, with a donut chart and legend showing how many checks passed, failed and are missing. Hover a slice for its count and share.
 - **Summary tiles:** failing requirements, objects with issues, object groups with failures, and property sets with failures.
 - **By object group** and **By property set:** the share of checks passed, worst first. Hover a bar for details.
-- **Requirements:** a table you can filter by status and group, search, and sort.
-- **Values:** pick a requirement (it opens on `NONS_Process.ProcessStatus`) to see every value in the model, how many objects have it, and whether it passes. Missing values are shown as *Missing*, and values of the wrong type show the type, e.g. `yes (IfcLabel)`. Click a value to list only its objects. The list shows each object's status, value, class, name, GlobalId and group, and can be filtered, searched and sorted.
+- **Requirements:** a table with the failed and missing count per requirement, which you can filter by status and group, search, and sort. A requirement shows as *Missing* when all its problems are missing values, and *Failing* when at least one value is wrong.
+- **Values:** pick a requirement (it opens on `NONS_Process.ProcessStatus`) to see every value in the model, how many objects have it, and whether it passes. Objects with no value are grouped as *Missing*, and values of the wrong type show the type, e.g. `yes (IfcLabel)`. The list can be filtered by Passing, Failing or Missing. Click a value to list only its objects. The list shows each object's status, value, class, name, GlobalId and group, and can be filtered, searched and sorted.
 - **Objects:** each object's class, name, GlobalId and failing requirements. It shows the objects with the most issues first; switch to *All objects* to list every object checked. You can filter by class and search by name or GlobalId.
 
 It follows the system light/dark mode and has its own theme toggle.

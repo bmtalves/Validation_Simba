@@ -57,6 +57,13 @@ class Result:
     passed: bool
     value: str | None = None   # what the model has for this requirement, as text; None if missing
 
+    @property
+    def status(self):
+        """"passed", "missing" (no value at all) or "failed" (a value that isn't valid)"""
+        if self.passed:
+            return "passed"
+        return "missing" if self.value is None else "failed"
+
 
 def main():
     model_path, rules_path = get_arguments(sys.argv)
@@ -478,19 +485,28 @@ def validate(model, concepts, allowed=None):
 
 # ---------- Output ----------
 
-def print_summary(results):
-    totals = {}
+def count_statuses(results):
+    counts = {"passed": 0, "failed": 0, "missing": 0}
     for result in results:
-        passed, total = totals.get(result.concept, (0, 0))
-        totals[result.concept] = (passed + result.passed, total + 1)
+        counts[result.status] += 1
+    return counts
+
+
+def print_summary(results):
+    by_concept = {}
+    for result in results:
+        by_concept.setdefault(result.concept, []).append(result)
 
     print()
-    for concept, (passed, total) in totals.items():
-        status = "OK  " if passed == total else "FAIL"
-        print(f"{status} {concept.group:<30} {concept.label:<50} {total - passed}/{total} failed")
+    for concept, concept_results in by_concept.items():
+        counts = count_statuses(concept_results)
+        status = "OK  " if counts["passed"] == len(concept_results) else "FAIL"
+        print(f"{status} {concept.group:<30} {concept.label:<50} "
+              f"{counts['failed']} failed, {counts['missing']} missing of {len(concept_results)}")
 
-    failed = sum(not r.passed for r in results)
-    print(f"\n{len(results) - failed} of {len(results)} checks passed ({len(totals)} requirements on objects in the model)")
+    counts = count_statuses(results)
+    print(f"\n{counts['passed']} of {len(results)} checks passed, {counts['failed']} failed, {counts['missing']} missing "
+          f"({len(by_concept)} requirements on objects in the model)")
 
 
 def export_csv(results, filename):
@@ -505,8 +521,11 @@ def export_csv(results, filename):
                 "Group": result.concept.group,
                 "Requirement": result.concept.label,
                 "Value": "" if result.value is None else result.value,
-                "Validation": "PASSED" if result.passed else "FAILED",
+                "Validation": result.status.upper(),
             })
+
+
+STATUS_CODES = {"failed": 0, "passed": 1, "missing": 2}
 
 
 def dashboard_data(results, model, model_path, phase):
@@ -514,7 +533,7 @@ def dashboard_data(results, model, model_path, phase):
     objects = {}
     values = {}
     # One row per check, as indexes into the lists above to keep the file small:
-    # [object, requirement, passed (1/0), value (-1 if missing)]
+    # [object, requirement, status (1 passed, 0 failed, 2 missing), value (-1 if missing)]
     checks = []
     for result in results:
         concept, element = result.concept, result.element
@@ -528,8 +547,9 @@ def dashboard_data(results, model, model_path, phase):
             "type": required[3] if is_property else None,
             "passed": 0,
             "failed": 0,
+            "missing": 0,
         })
-        requirement["passed" if result.passed else "failed"] += 1
+        requirement[result.status] += 1
 
         obj = objects.setdefault(element.id(), {
             "id": getattr(element, "GlobalId", ""),
@@ -544,7 +564,7 @@ def dashboard_data(results, model, model_path, phase):
             obj["failed"].append(concept.label)
 
         value = -1 if result.value is None else values.setdefault(result.value, len(values))
-        checks.append([obj["index"], requirement["index"], int(result.passed), value])
+        checks.append([obj["index"], requirement["index"], STATUS_CODES[result.status], value])
 
     return {
         "model": Path(model_path).name,
